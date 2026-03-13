@@ -1,43 +1,42 @@
+import streamlit as st
+import pandas as pd
 import os
 
-def get_coefficient_from_excel(gender, birth_date, ret_year, assets, coverage_pct, guarantee_months):
-    try:
-        # נתיב לקובץ המקור ולקובץ זמני (למניעת בעיות הרשאות בשרת)
-        source_file = 'simulator_prisha.xlsm'
-        temp_file = '/tmp/temp_sim.xlsm' if os.path.exists('/tmp') else 'temp_sim.xlsm'
-        
-        # טעינת הקובץ
-        wb = openpyxl.load_workbook(source_file, keep_vba=True, data_only=False)
-        if 'חישוב זקנה' not in wb.sheetnames:
-            st.error(f"גיליון 'חישוב זקנה' לא נמצא. הגיליונות הקיימים: {wb.sheetnames}")
-            return None, None
-            
-        sheet = wb['חישוב זקנה']
-        
-        # הזנת נתונים - וודא שהתאים האלו אכן פתוחים לעריכה באקסל
-        sheet['C14'] = birth_date.strftime('%d/%m/%Y')
-        sheet['C13'] = int(ret_year)
-        sheet['C15'] = "זכר" if gender == "גבר" else "נקבה"
-        sheet['C18'] = float(assets)
-        sheet['C20'] = float(coverage_pct) / 100
-        sheet['C21'] = int(guarantee_months)
-        
-        # שמירה
-        wb.save(temp_file)
-        
-        # טעינה מחדש של הערכים המחושבים
-        # הערה: openpyxl לא תמיד מצליחה לחשב נוסחאות XLSM מורכבות ללא אקסל מותקן
-        wb_res = openpyxl.load_workbook(temp_file, data_only=True)
-        sheet_res = wb_res['חישוב זקנה']
-        
-        coeff = sheet_res['C28'].value
-        pension = sheet_res['C29'].value
-        
-        # בדיקה אם הערך הוא נוסחה (אם קיבלנו מחרוזת שמתחילה ב-= במקום מספר)
-        if isinstance(coeff, str) and coeff.startswith('='):
-            st.warning("השרת מחזיר את הנוסחה ולא את הערך המחושב. ייתכן והאקסל מוגן או דורש חישוב ידני.")
-            
-        return coeff, pension
-    except Exception as e:
-        st.error(f"שגיאה טכנית בסנכרון: {e}")
-        return None, None
+# ניסיון לייבא ספריות חיצוניות עם הגנה
+try:
+    import openpyxl
+    import plotly.graph_objects as go
+except ImportError:
+    st.error("השרת עדיין מתקין ספריות. המתן דקה ורענן את הדף (F5).")
+
+def main():
+    st.set_page_config(page_title="אפקט - מערכת פרישה", layout="wide")
+    
+    # בדיקה אם קובץ האקסל קיים בשרת
+    excel_exists = os.path.exists('simulator_prisha.xlsm')
+    
+    if not excel_exists:
+        st.warning("⚠️ קובץ האקסל 'simulator_prisha.xlsm' לא נמצא ב-GitHub. הסנכרון האוטומטי לא יפעל.")
+    
+    st.title("מערכת פרישה - אפקט")
+    
+    # טבלת קופות פשוטה להתחלה
+    if 'rows' not in st.session_state:
+        st.session_state.rows = [{'קופה': 'פנסיה', 'קצבתי': 1000000, 'הוני': 0, 'מקדם': 200}]
+    
+    df = pd.DataFrame(st.session_state.rows)
+    edited_df = st.data_editor(df, num_rows="dynamic", use_container_width=True)
+    
+    # כפתור סנכרון עם הגנה
+    if st.button("🔄 נסה לסנכרן עם אקסל"):
+        if not excel_exists:
+            st.error("לא ניתן לסנכרן: הקובץ חסר ב-GitHub.")
+        else:
+            st.info("מנסה להתחבר לקובץ...")
+            # כאן יבוא קוד הסנכרון שכתבנו קודם
+
+    st.write("---")
+    st.write("אם אתה רואה את ההודעה הזו, האפליקציה רצה בהצלחה!")
+
+if __name__ == "__main__":
+    main()
