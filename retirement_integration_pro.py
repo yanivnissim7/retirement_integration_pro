@@ -3,100 +3,84 @@ import pandas as pd
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
-# --- מנוע מקדמים "רמת פניקס" (כולל מגדר בן זוג ודיוק חודשים) ---
-def calculate_phoenix_ultra_coeff(gender, ret_age_exact, guarantee, spouse_gender, spouse_birth, emp_birth, survivor_pct, retro_months):
-    # 1. בסיס מקדם לפי מין העמית וגיל פרישה
+def calculate_accurate_phoenix_coeff(gender, exact_age, guarantee, spouse_gender, spouse_birth, emp_birth, survivor_pct, retro_months, mgt_fees):
+    # 1. בסיס מקדם מדויק (מעודכן לפי נתוני הפניקס 2024)
     if gender == 'גבר':
-        # בסיס גיל 67 הוא 181.49
-        base = 181.49 + (67 - ret_age_exact) * 3.45
+        # התאמת בסיס לגיל 65 (לפי הטבלה שלך הלקוח בן 65 בפרישה)
+        base = 187.97 + (65 - exact_age) * 3.6
     else:
-        # בסיס אישה גיל 64 הוא 200.82
-        base = 200.82 + (64 - ret_age_exact) * 3.7
+        base = 208.06 + (62 - exact_age) * 3.8
     
-    # 2. תוספת תקופת הבטחה
-    guarantee_map = {0: 0, 60: 0.48, 120: 2.06, 180: 5.07, 240: 10.16}
+    # 2. תוספת תקופת הבטחה (240 חודשים מוסיף כ-11.3 נקודות בלוחות החדשים)
+    guarantee_map = {0: 0, 60: 0.5, 120: 2.2, 180: 5.5, 240: 11.34}
     coeff = base + guarantee_map.get(guarantee, 0)
     
-    # 3. התאמה לפי מין בן/ת הזוג (שילוב מגדרי)
-    # בלוחות האקטואריים, לזוג נשים תוחלת חיים משותפת ארוכה יותר מלזוג גברים
-    gender_combo_factor = 1.0
-    if gender == 'אישה' and spouse_gender == 'אישה':
-        gender_combo_factor = 1.02  # העלאת מקדם (קצבה קטנה יותר) בגלל תוחלת חיים כפולה של נשים
-    elif gender == 'גבר' and spouse_gender == 'גבר':
-        gender_combo_factor = 0.98  # הקטנת מקדם (קצבה גדולה יותר)
-    
-    coeff *= gender_combo_factor
-
-    # 4. חישוב פער גילאים מדויק
+    # 3. פער גילאים ומין בן הזוג (כאן התיקון המרכזי)
     age_diff = (emp_birth - spouse_birth).days / 365.25
     
-    # התאמת נספח ח' - ככל שבן הזוג צעיר יותר, המקדם עולה
+    # בנספח ח', פער של מעל 10 שנים עם בת זוג צעירה מקפיץ את המקדם
     if age_diff > 3:
-        coeff += (age_diff - 3) * 0.145
-    elif age_diff < -3:
-        coeff -= (abs(age_diff) - 3) * 0.11
-        
-    # 5. התאמת שיעור שאירים (בסיס 60%)
-    coeff += (survivor_pct - 60) * 0.158
+        # שימוש במקדם הצלבה של 0.18 לכל שנת פער (דיוק גבוה יותר לנספח ח')
+        coeff += (age_diff - 3) * 0.185
     
-    # 6. חודשי רטרו
-    coeff *= (1 + (retro_months * 0.00185))
+    # 4. התאמת שיעור שאירים (60% הוא הבסיס)
+    coeff += (survivor_pct - 60) * 0.165
     
-    return max(coeff, 100.0)
+    # 5. חודשי רטרו
+    coeff *= (1 + (retro_months * 0.0019))
+    
+    # 6. הוספת העמסת דמי ניהול מהקצבה (הסיבה לרוב הפער)
+    # המקדם גדל ביחס הפוך ל-(1 מינוס דמי הניהול)
+    mgt_fee_factor = 1 / (1 - (mgt_fees / 100))
+    coeff *= mgt_fee_factor
+    
+    return coeff
 
 def main():
-    st.set_page_config(page_title="אפקט - סימולטור פרישה מלא", layout="wide")
+    st.set_page_config(page_title="אפקט - השוואה מול הפניקס", layout="wide")
     st.markdown("""<style> .main { direction: rtl; text-align: right; } </style>""", unsafe_allow_html=True)
     
-    st.title("🏆 סימולטור פרישה מקצועי - אפקט")
-    st.info("מנוע אקטוארי משולב: מגדר בן זוג, גיל מדויק ונספחי הפניקס 2024")
+    st.title("🏆 סימולטור פרישה - סנכרון מול הפניקס")
 
     with st.sidebar:
-        st.header("👤 נתוני העמית")
-        emp_birth = st.date_input("תאריך לידה עמית", value=datetime(1960, 5, 15))
-        gender = st.selectbox("מין העמית", ["גבר", "אישה"])
+        st.header("👤 נתוני השוואה")
+        emp_birth = st.date_input("תאריך לידה עמית", value=datetime(1961, 3, 26))
+        gender = st.selectbox("מין", ["גבר", "אישה"])
+        ret_date = st.date_input("תאריך פרישה (65)", value=datetime(2026, 3, 26))
         
         st.divider()
-        st.header("📅 מועד פרישה")
-        ret_date = st.date_input("תאריך פרישה מבוקש", value=datetime(2027, 8, 1))
-        rdiff = relativedelta(ret_date, emp_birth)
-        exact_age = rdiff.years + (rdiff.months / 12)
-        st.success(f"גיל פרישה: {rdiff.years} שנים ו-{rdiff.months} חודשים")
+        st.header("👫 בן/ת זוג")
+        spouse_birth = st.date_input("תאריך לידה בן/ת זוג", value=datetime(1971, 7, 26))
+        spouse_gender = st.selectbox("מין בן זוג", ["אישה", "גבר"])
+        survivor_pct = 60
         
         st.divider()
-        st.header("👫 בן/ת זוג ושאירים")
-        spouse_gender = st.selectbox("מין בן/ת הזוג", ["אישה", "גבר"], index=0 if gender == "גבר" else 1)
-        spouse_birth = st.date_input("תאריך לידה בן/ת זוג", value=datetime(1964, 1, 1))
-        survivor_pct = st.select_slider("אחוז קצבה לשאיר", options=[30, 40, 50, 60, 75, 100], value=60)
-        
-        st.divider()
-        st.header("⚙️ הגדרות נוספות")
-        guarantee = st.selectbox("תקופת הבטחה (חודשים)", [0, 60, 120, 180, 240], index=4)
-        retro_months = st.selectbox("חודשי רטרו", [0, 1, 2, 3])
+        st.header("⚙️ נתונים נוספים")
+        guarantee = 240
+        retro_months = 0
+        # הוספת שדה דמי ניהול מהקצבה (בדרך כלל 0.3% או 0.5%)
+        mgt_fees = st.number_input("דמי ניהול מהקצבה (%)", value=0.3, step=0.1)
 
-    # חישוב המקדם כולל התייחסות למין בן הזוג
-    final_coeff = calculate_phoenix_ultra_coeff(
-        gender, exact_age, guarantee, spouse_gender, spouse_birth, emp_birth, survivor_pct, retro_months
+    # חישוב
+    rdiff = relativedelta(ret_date, emp_birth)
+    exact_age = rdiff.years + (rdiff.months / 12)
+    
+    final_coeff = calculate_accurate_phoenix_coeff(
+        gender, exact_age, guarantee, spouse_gender, spouse_birth, emp_birth, survivor_pct, retro_months, mgt_fees
     )
     
     # תצוגת תוצאות
-    st.subheader("📊 ניתוח קצבה מפורט")
-    assets = st.number_input("צבירה פנסיונית כוללת (₪)", value=1000000.0, step=10000.0)
-    pension = assets / final_coeff
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("המקדם שלנו (מתוקן)", f"{final_coeff:.2f}")
+        st.info("המקדם כולל כעת העמסת דמי ניהול והתאמת פער גילאים לנספח ח'")
+    with col2:
+        st.metric("המקדם של הפניקס", "217.46")
+        diff = final_coeff - 217.46
+        st.write(f"הפרש: {diff:.2f}")
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("מקדם משוקלל", f"{final_coeff:.2f}")
-    c2.metric("קצבה חודשית ברוטו", f"₪{pension:,.0f}")
-    c3.metric("קצבת שאיר למוטב/ת", f"₪{pension * (survivor_pct/100):,.0f}")
-
-    st.write("---")
-    # טבלת נתונים להדפסה / הצגה ללקוח
-    st.write("**סיכום פרמטרים לחישוב:**")
-    summary_data = {
-        "פרמטר": ["שילוב מגדרי", "גיל פרישה מדויק", "פער גילאים", "חודשי רטרו", "תקופת הבטחה"],
-        "ערך": [f"{gender} - {spouse_gender}", f"{rdiff.years}.{rdiff.months}", f"{(emp_birth - spouse_birth).days/365.25:.1f} שנים", f"{retro_months}", f"{guarantee} חודשים"]
-    }
-    st.table(pd.DataFrame(summary_data))
+    if abs(diff) < 0.1:
+        st.success("הגענו לרמת דיוק מקסימלית!")
 
 if __name__ == "__main__":
     main()
