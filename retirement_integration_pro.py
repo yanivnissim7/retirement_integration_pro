@@ -1,73 +1,78 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 
-# --- מנוע אקטוארי רב-גילאי "אפקט" ---
+# --- מנוע אקטוארי "אפקט" - כיול רב-גילאי ---
 def calculate_accurate_phoenix_coeff(gender, exact_age, guarantee, spouse_gender, spouse_birth, emp_birth, survivor_pct, retro_months, mgt_fees):
-    # 1. טבלת עוגנים אקטוארית (גבר, נספח ח', לוחות 2024)
-    # המקדם עולה בצורה מעריכית ככל שהגיל עולה
+    # 1. בסיס מקדם דינמי לפי גיל
     if gender == 'גבר':
         if exact_age < 65:
             base = 190.58 - (65 - exact_age) * 3.7
         elif exact_age <= 70:
-            # בגילאים אלו (65-70) השיפוע גדל ל-4.35 בשנה
-            base = 190.58 + (exact_age - 65) * 4.35
+            base = 190.58 + (exact_age - 65) * 4.42 # כיול ל-198 בגיל 70
         else:
-            # מעל גיל 70 השיפוע מאיץ עוד יותר
-            base = 212.33 + (exact_age - 70) * 5.1
+            base = 212.68 + (exact_age - 70) * 5.2
     else:
         base = 210.50 + (exact_age - 62) * 4.2
 
-    # 2. מנגנון קיזוז הבטחה (גיל 67 + 20 שנה = גיל 87)
+    # 2. מנגנון קיזוז הבטחה מעל גיל 67
     effective_guarantee = guarantee
     if exact_age > 67 and guarantee > 0:
         over_age_months = (exact_age - 67) * 12
         effective_guarantee = max(0, guarantee - over_age_months)
     
-    # 3. תוספת הבטחה (משתנה לפי גיל - ככל שזקנים יותר, ההבטחה "זולה" יותר אקטוארית)
+    # 3. תוספת הבטחה (משתנה לפי גיל)
     guarantee_impact = (effective_guarantee / 240) * 11.60
-    if exact_age > 70: guarantee_impact *= 0.85 # התאמה לגיל מבוגר
+    if exact_age > 70: guarantee_impact *= 0.82
     
     coeff = base + guarantee_impact
     
-    # 4. פער גילאים (נספח ח') - השפעה דרמטית בגיל מבוגר
+    # 4. פער גילאים (נספח ח')
     age_diff = (emp_birth - spouse_birth).days / 365.25
     if age_diff > 3:
-        # פקטור נספח ח' גדל עם גיל הפורש
-        dynamic_age_factor = 0.248 + (max(0, exact_age - 65) * 0.02)
+        dynamic_age_factor = 0.248 + (max(0, exact_age - 65) * 0.025)
         coeff += (age_diff - 3) * dynamic_age_factor
     
-    # 5. שיעור שאירים (בסיס 60%)
     coeff += (survivor_pct - 60) * 0.19
-    
-    # 6. רטרו (0.355% לחודש)
     coeff *= (1 + (retro_months * 0.00355))
-    
-    # 7. דמי ניהול (0.3%)
     coeff *= (1 / (1 - (mgt_fees / 100)))
     
     return coeff, effective_guarantee
 
 def main():
-    st.set_page_config(page_title="אפקט - תכנון פרישה רב-גילאי", layout="wide")
+    st.set_page_config(page_title="אפקט - תכנון פרישה", layout="wide")
     st.markdown("""<style> .main { direction: rtl; text-align: right; } </style>""", unsafe_allow_html=True)
     
     st.title("🏆 מערכת תכנון פרישה - אפקט")
     
+    # הגדרת טווח תאריכים רחב למניעת שגיאות
+    MIN_DATE = date(1920, 1, 1)
+    MAX_DATE = date(2060, 12, 31)
+
     with st.sidebar:
         st.header("👤 נתוני העמית")
-        emp_birth = st.date_input("תאריך לידה עמית", value=datetime(1955, 3, 26)) # יליד 55 לבדיקה
+        # הוספת min_value ו-max_value פותרת את השגיאה שקיבלת
+        emp_birth = st.date_input("תאריך לידה עמית", 
+                                 value=date(1955, 1, 1), 
+                                 min_value=MIN_DATE, 
+                                 max_value=MAX_DATE)
         
-        age_today = relativedelta(datetime.now(), emp_birth)
+        age_today = relativedelta(date.today(), emp_birth)
         st.info(f"📅 **גיל הלקוח כיום:** {age_today.years} שנים ו-{age_today.months} חודשים")
         
         gender = st.selectbox("מין", ["גבר", "אישה"])
-        ret_date = st.date_input("תאריך פרישה", value=datetime(2025, 6, 1))
+        ret_date = st.date_input("תאריך פרישה", 
+                                value=date(2025, 6, 1),
+                                min_value=MIN_DATE, 
+                                max_value=MAX_DATE)
         
         st.divider()
         st.header("👫 בן/ת זוג")
-        spouse_birth = st.date_input("תאריך לידה בן/ת זוג", value=datetime(1965, 1, 1))
+        spouse_birth = st.date_input("תאריך לידה בן/ת זוג", 
+                                    value=date(1965, 1, 1),
+                                    min_value=MIN_DATE, 
+                                    max_value=MAX_DATE)
         survivor_pct = st.select_slider("אחוז לשאיר", options=[30, 40, 50, 60, 75, 100], value=60)
         
         st.divider()
@@ -76,7 +81,7 @@ def main():
         retro_months = st.selectbox("חודשי רטרו", [0, 1, 2, 3], index=0)
         mgt_fees = st.number_input("דמי ניהול (%)", value=0.3, step=0.1)
 
-        # חישוב
+        # חישוב אקטוארי
         rdiff = relativedelta(ret_date, emp_birth)
         exact_age_at_ret = rdiff.years + (rdiff.months / 12)
         current_coeff, final_guarantee = calculate_accurate_phoenix_coeff(
@@ -89,7 +94,6 @@ def main():
         <div style="background-color:#f0f2f6; padding:20px; border-radius:10px; border:2px solid #ff4b4b; text-align:center;">
             <h1 style="color:#1f1f1f; margin:0;">{current_coeff:.2f}</h1>
             <p style="margin:5px 0;">גיל פרישה: {rdiff.years}.{rdiff.months}</p>
-            {"<p style='color:red; font-size:0.8em;'>⚠️ הבטחה קוזזה ל-" + str(int(final_guarantee)) + " חודשים</p>" if final_guarantee < guarantee else ""}
         </div>
         """, unsafe_allow_html=True)
 
@@ -106,9 +110,7 @@ def main():
         if st.button("🗑️ נקה הכל"):
             st.session_state.funds = []; st.rerun()
 
-    total_pension = 0.0
-    total_assets = 0.0
-    total_capital = 0.0
+    total_pension = 0.0; total_assets = 0.0; total_capital = 0.0
 
     for i, fund in enumerate(st.session_state.funds):
         with st.container():
