@@ -3,133 +3,79 @@ import pandas as pd
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
-# --- מנוע אקטוארי "אפקט" - גרסה 27.0 חסינה ---
-def calculate_precise_menora_2026(gender, birth_date, ret_date, spouse_birth, req_guarantee, survivor_pct, mgt_fees, retro_months):
-    # 1. חישוב גיל מדויק
-    rdiff = relativedelta(ret_date, birth_date)
-    exact_age = rdiff.years + (rdiff.months / 12) + (rdiff.days / 365.25)
-    
-    # 2. טבלת עוגן נספח א' (גבר) - מורחבת
-    # הערה: המקדמים מתחת ל-60 ומעל 70 מחושבים לפי אינטרפולציה/ריגרסיה
-    anchors_base = {
-        60: 214.98, 61: 210.42, 62: 207.10, 63: 203.67, 64: 200.13,
-        65: 196.45, 66: 191.01, 67: 187.08, 68: 183.04, 69: 178.88, 70: 174.58
-    }
-    
-    # מנגנון שליפת בסיס חסין לכל גיל (18-90)
-    if exact_age < 60:
-        # עליה של כ-4.5 נקודות לכל שנה מתחת ל-60
-        base = 214.98 + (60 - exact_age) * 4.5
-    elif exact_age <= 70:
-        floor_age = int(exact_age)
-        ceil_age = floor_age + 1
-        if floor_age in anchors_base and ceil_age in anchors_base:
-            base = anchors_base[floor_age] - (anchors_base[floor_age] - anchors_base[ceil_age]) * (exact_age - floor_age)
-        else:
-            base = anchors_base.get(floor_age, 174.58)
-    else:
-        # ריגרסיה מעל גיל 70 (ירידה של 4.2 נקודות לשנה)
-        base = 174.58 - (exact_age - 70) * 4.2
-
-    # 3. תוספת הבטחה (נספח ד') - מנגנון קיזוז גיל 87
-    max_guarantee_age = 87
-    available_months = max(0, (max_guarantee_age - exact_age) * 12)
-    eff_guarantee = min(float(req_guarantee), available_months)
-    
-    # חישוב עלות הבטחה בסיסית (יחסית לגיל)
-    # גיל 60: 4.80 | גיל 70: 21.85
-    if exact_age >= 70:
-        base_guarantee_add = 21.85
-    elif exact_age >= 60:
-        base_guarantee_add = 4.80 + (21.85 - 4.80) * (exact_age - 60) / 10
-    else:
-        base_guarantee_add = 4.80 # עלות מינימלית לגילאים צעירים
-    
-    guarantee_impact = base_guarantee_add * (eff_guarantee / 240)
-    
-    # 4. שקלול סופי
-    coeff = base + guarantee_impact
-    coeff += (survivor_pct - 60) * 0.18 # תוספת שאיר
-    
-    # פער גילאים (מעל 3 שנים)
-    age_diff = (birth_date - spouse_birth).days / 365.25
-    if age_diff > 3:
-        coeff += (age_diff - 3) * 0.22
-        
-    # דמי ניהול ורטרו
-    coeff /= (1 - (mgt_fees / 100))
-    coeff *= (1 + (retro_months * 0.00355))
-    
-    return round(coeff, 2), round(eff_guarantee, 1), round(exact_age, 2)
-
 def main():
-    st.set_page_config(page_title="אפקט - סימולטור פרישה", layout="wide")
-    st.title("🏆 סימולטור פרישה אפקט - דיוק מלא")
+    st.set_page_config(page_title="אפקט - ניהול פרישה", layout="wide")
+    st.title("🏆 סימולטור פרישה - אפקט")
+    st.caption("כלי לריכוז נתונים והפקת דוח | הזנת מקדמים ידנית")
 
+    # --- SIDEBAR: פרטי לקוח ופרמטרים כלליים ---
     with st.sidebar:
-        st.header("👤 נתוני העמית")
-        gender = st.selectbox("מין", ["גבר", "אישה"])
-        
-        # טווח תאריכי לידה המאפשר גילאי 18-90
-        min_date = date.today() - relativedelta(years=90)
-        max_date = date.today() - relativedelta(years=18)
-        
-        birth_date = st.date_input("תאריך לידה עמית", 
-                                   value=date(1965, 11, 26),
-                                   min_value=min_date, 
-                                   max_value=max_date)
-        
-        ret_date = st.date_input("תאריך פרישה (תחילת קצבה)", value=date(2026, 11, 26))
+        st.header("👤 פרטי העמית")
+        emp_name = st.text_input("שם העמית", "ישראל ישראלי")
+        birth_date = st.date_input("תאריך לידה", value=date(1965, 11, 26), 
+                                  min_value=date(1935, 1, 1), max_value=date(2008, 1, 1))
+        ret_date = st.date_input("תאריך פרישה מתוכנן", value=date(2026, 11, 26))
         
         st.divider()
-        st.header("👫 נתוני בן/ת זוג")
-        # טווח גילאים לבן/ת זוג (18-90)
-        spouse_birth = st.date_input("תאריך לידה בן/ת זוג", 
-                                     value=date(1968, 11, 26),
-                                     min_value=min_date, 
-                                     max_value=date.today() - relativedelta(years=18))
+        st.header("👫 בן/ת זוג")
+        spouse_name = st.text_input("שם בן/ת זוג", "")
+        spouse_birth = st.date_input("תאריך לידה בן/ת זוג", value=date(1968, 11, 26),
+                                    min_value=date(1935, 1, 1), max_value=date(2008, 1, 1))
         
-        survivor_pct = st.select_slider("אחוז קצבה לשאיר", options=[30, 40, 50, 60, 75, 100], value=60)
+        # חישובי גיל בסיסיים לצורך התצוגה בלבד
+        rdiff = relativedelta(ret_date, birth_date)
+        age_at_ret = f"{rdiff.years}.{rdiff.months}"
         
         st.divider()
-        st.header("⚙️ מסלול פרישה")
-        guarantee = st.selectbox("תקופת הבטחה (חודשים)", [0, 60, 120, 180, 240], index=4)
-        mgt_fees = st.number_input("דמי ניהול מהקצבה (%)", value=0.3, step=0.1)
-        retro = st.selectbox("חודשי רטרו", [0, 1, 2, 3], index=0)
+        st.info(f"גיל פרישה מתוכנן: {age_at_ret}")
 
-    # הרצת המנוע
-    res_coeff, eff_g, exact_age = calculate_precise_menora_2026(
-        gender, birth_date, ret_date, spouse_birth, guarantee, survivor_pct, mgt_fees, retro
-    )
-
-    # תצוגת תוצאות
-    st.subheader(f"ניתוח אקטוארי - גיל פרישה {exact_age}")
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.metric("הבטחה אפקטיבית (עד גיל 87)", f"{eff_g} חודשים")
-        st.info(f"החישוב מבוסס על גיל פרישה מדויק של {exact_age} שנים.")
-
-    with col2:
-        st.markdown(f"""
-            <div style="background-color:#f9f9f9; padding:20px; border-radius:15px; border:2px solid #1e88e5; text-align:center;">
-                <h3 style="margin:0; color:#1e88e5;">מקדם סופי</h3>
-                <h1 style="margin:10px; font-size:48px;">{res_coeff}</h1>
-            </div>
-        """, unsafe_allow_html=True)
-
-    # טבלת צבירות
-    st.divider()
+    # --- MAIN SECTION: טבלת קופות והזנת נתונים ---
     st.subheader("💰 ריכוז קופות וצבירות")
+    st.write("הזן את נתוני הצבירה והמקדמים המדויקים מהסימולטור המוסדי:")
+
     if 'funds' not in st.session_state:
-        st.session_state.funds = [{'name': 'מנורה מבטחים', 'amount': 1000000.0}]
+        st.session_state.funds = [{'name': 'מנורה מבטחים', 'type': 'קצבתי', 'amount': 1000000.0, 'coeff': 197.10}]
+
+    col_btn1, col_btn2 = st.columns([1, 5])
+    if col_btn1.button("➕ הוסף קופה"):
+        st.session_state.funds.append({'name': '', 'type': 'קצבתי', 'amount': 0.0, 'coeff': 200.0})
+        st.rerun()
+    if col_btn2.button("🗑️ נקה הכל"):
+        st.session_state.funds = []
+        st.rerun()
+
+    total_pension = 0.0
+    total_capital = 0.0
 
     for i, fund in enumerate(st.session_state.funds):
-        c1, c2, c3 = st.columns([3, 2, 2])
-        fund['name'] = c1.text_input("שם הקופה", fund['name'], key=f"n_{i}")
-        fund['amount'] = c2.number_input("סכום הצבירה (₪)", fund['amount'], key=f"a_{i}")
-        pension = fund['amount'] / res_coeff if res_coeff > 0 else 0
-        c3.markdown(f"**קצבה צפויה:** ₪{pension:,.0f}")
+        with st.expander(f"קופה {i+1}: {fund['name'] if fund['name'] else 'חדשה'}", expanded=True):
+            c1, c2, c3, c4 = st.columns([2, 1, 2, 1])
+            fund['name'] = c1.text_input("שם הקופה / יצרן", fund['name'], key=f"n_{i}")
+            fund['type'] = c2.selectbox("סוג כסף", ["קצבתי", "הוני"], index=0 if fund['type'] == 'קצבתי' else 1, key=f"t_{i}")
+            fund['amount'] = c3.number_input("סכום צבירה (₪)", value=fund['amount'], step=1000.0, key=f"a_{i}")
+            
+            if fund['type'] == 'קצבתי':
+                fund['coeff'] = c4.number_input("מקדם (הזנה ידנית)", value=fund['coeff'], step=0.01, format="%.2f", key=f"c_{i}")
+                pension_contribution = fund['amount'] / fund['coeff'] if fund['coeff'] > 0 else 0
+                total_pension += pension_contribution
+                st.write(f"👉 **קצבה חזויה מקופה זו:** ₪{pension_contribution:,.2f}")
+            else:
+                total_capital += fund['amount']
+                c4.write("")
+                st.write("💰 **כסף הוני - לא נכלל בחישוב הקצבה**")
+
+    # --- SUMMARY: סיכום דוח ---
+    st.divider()
+    st.subheader(f"📊 סיכום דוח פרישה עבור: {emp_name}")
+    
+    res1, res2, res3 = st.columns(3)
+    res1.metric("סה\"כ קצבה חודשית (ברוטו)", f"₪{total_pension:,.2f}")
+    res2.metric("סה\"כ הון חד פעמי", f"₪{total_capital:,.0f}")
+    res3.metric("סה\"כ צבירה בניהול", f"₪{(total_capital + sum(f['amount'] for f in st.session_state.funds if f['type']=='קצבתי')):,.0f}")
+
+    # אפשרות להערות מקצועיות
+    st.divider()
+    notes = st.text_area("הערות והמלצות למתכנן הפרישה:", "בהתאם למסלול שנבחר בסימולטור המוסדי...")
 
 if __name__ == "__main__":
     main()
