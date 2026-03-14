@@ -23,8 +23,8 @@ def calculate_income_tax(monthly_income, credit_points=2.25):
     return max(0, tax - (credit_points * 250)), marginal_rate
 
 def main():
-    st.set_page_config(page_title="אפקט - תכנון פרישה כולל ותיקות ותקציביות", layout="wide")
-    st.markdown("""<style>.main { direction: rtl; text-align: right; }</style>""", unsafe_allow_html=True)
+    st.set_page_config(page_title="אפקט - דוח פריסה וכדאיות", layout="wide")
+    st.markdown("""<style> .main { direction: rtl; text-align: right; } </style>""", unsafe_allow_html=True)
 
     with st.sidebar:
         st.header("👤 נתוני בסיס")
@@ -52,24 +52,17 @@ def main():
 
     with tab1:
         st.subheader("ריכוז קצבאות וצבירות")
+        v_pension_amount = st.number_input("קצבה חודשית קיימת (ותיקה/תקציבית) ברוטו ₪", value=0.0)
         
-        # שורה חדשה: פנסיה ותיקה / תקציבית
-        st.markdown("##### 🏛️ פנסיה ותיקה / תקציבית / קצבה קיימת")
-        col_v1, col_v2 = st.columns([3, 2])
-        v_pension_name = col_v1.text_input("מקור הקצבה (ותיקה/תקציבית/אחר)", value="פנסיה ותיקה")
-        v_pension_amount = col_v2.number_input("סכום קצבה חודשי ברוטו ₪", value=0.0)
-        
-        st.divider()
-        st.markdown("##### 💳 קופות גמל וביטוחי מנהלים (צבירות)")
         if 'funds' not in st.session_state:
-            st.session_state.funds = [{'name': 'מנורה מבטחים', 'type': 'קצבתי', 'amount': 1000000.0, 'coeff': 197.10, 'include': True}]
+            st.session_state.funds = [{'name': 'קופה 1', 'type': 'קצבתי', 'amount': 1000000.0, 'coeff': 197.10, 'include': True}]
 
         if st.button("➕ הוסף קופה"):
             st.session_state.funds.append({'name': '', 'type': 'קצבתי', 'amount': 0.0, 'coeff': 200.0, 'include': True})
             st.rerun()
 
         total_new_pension_to_spread = 0.0
-        all_future_pension_total = v_pension_amount # מתחילים מהותיקה/תקציבית
+        all_future_pension_total = v_pension_amount
         
         for i, fund in enumerate(st.session_state.funds):
             c1, c2, c3, c4, c5 = st.columns([2, 1, 2, 1, 1])
@@ -79,68 +72,83 @@ def main():
             if fund['type'] == 'קצבתי':
                 fund['coeff'] = c4.number_input("מקדם", value=float(fund.get('coeff',200)), key=f"c_{i}")
                 fund['include'] = c5.checkbox("כלול בפריסה?", value=fund.get('include', True), key=f"inc_{i}")
-                pension_val = fund['amount'] / fund['coeff'] if fund['coeff'] > 0 else 0
-                all_future_pension_total += pension_val
+                p_val = fund['amount'] / fund['coeff'] if fund['coeff'] > 0 else 0
+                all_future_pension_total += p_val
                 if fund['include']:
-                    total_new_pension_to_spread += pension_val
+                    total_new_pension_to_spread += p_val
 
     with tab2:
         st.subheader("קיבוע זכויות")
         pct_to_pension = st.select_slider("ניצול פטור לקצבה:", options=range(0,101,10), value=0)
         selected_mon_exemp = (rem_sal_base / 180) * (pct_to_pension / 100)
         rem_honi_ptur = rem_sal_base * (1 - (pct_to_pension / 100))
-        
-        col_m1, col_m2 = st.columns(2)
-        col_m1.metric("פטור חודשי על הקצבה", fmt_num(selected_mon_exemp))
-        col_m2.metric("יתרת הון פטורה", fmt_num(rem_honi_ptur))
+        st.metric("פטור חודשי שנבחר", fmt_num(selected_mon_exemp))
+        st.metric("יתרת הון פטורה", fmt_num(rem_honi_ptur))
 
     with tab3:
-        st.subheader("דוח פריסת מס")
-        st.info(f"מענק חייב לפריסה: {fmt_num(taxable_grant)}")
+        st.subheader("דוח פריסה שנתי (למס הכנסה)")
+        st.info(f"מענק פטור: {fmt_num(total_exempt_grant)} | מענק חייב בפריסה: {fmt_num(taxable_grant)}")
         
-        is_after_oct = ret_date.month >= 10
         start_year = st.selectbox("שנת תחילת פריסה:", [ret_date.year, ret_date.year + 1])
-        num_years = st.slider("שנות פריסה:", 1, 5 if (not is_after_oct and start_year > ret_date.year) else 6, 6)
-        
-        first_year_work = st.number_input("הכנסות עבודה שנה א' (משכורות ברוטו):", value=0)
-        other_inc = st.number_input("הכנסה חודשית נוספת (שכר עתידי):", value=0)
+        num_years = st.slider("שנות פריסה:", 1, 6, 6)
+        other_inc_monthly = st.number_input("הכנסה חודשית נוספת בפריסה (שכר):", value=0)
 
-        ann_tax = taxable_grant / num_years
-        rows = []
+        ann_tax_grant = taxable_grant / num_years
+        spread_rows = []
+        total_tax_spread = 0
+        
         for i in range(num_years):
             yr = start_year + i
-            # הכנסה בסיסית כוללת את הותיקה/תקציבית תמיד + הקופות החדשות שסומנו + שכר
-            pension_base = v_pension_amount + total_new_pension_to_spread
-            base_annual = first_year_work if (i == 0 and yr == ret_date.year) else (pension_base + other_inc) * 12
-            total_annual = base_annual + ann_tax
+            # עמודה 1: קצבה שנתית (כולל הכל)
+            annual_pension = (v_pension_amount + total_new_pension_to_spread + other_inc_monthly) * 12
+            # עמודה 2: המענק
+            # עמודה 3: ברוטו כולל
+            total_annual_bruto = annual_pension + ann_tax_grant
             
-            tax_t, m_r = calculate_income_tax(max(0, (total_annual/12) - selected_mon_exemp), credit_points)
-            rows.append({"שנה": yr, "ברוטו שנתי כולל": fmt_num(total_annual), "שולי": f"{m_r*100:.0f}%"})
-        st.table(pd.DataFrame(rows))
+            tax_total, m_r = calculate_income_tax(max(0, (total_annual_bruto/12) - selected_mon_exemp), credit_points)
+            tax_base, _ = calculate_income_tax(max(0, (annual_pension/12) - selected_mon_exemp), credit_points)
+            tax_on_grant = (tax_total - tax_base) * 12
+            total_tax_spread += tax_on_grant
+
+            spread_rows.append({
+                "שנה": yr,
+                "קצבה שנתית (X12)": fmt_num(annual_pension),
+                "חלק מענק בפריסה": fmt_num(ann_tax_grant),
+                "סה\"כ ברוטו שנתי": fmt_num(total_annual_bruto),
+                "מס שנתי על המענק": fmt_num(max(0, tax_on_grant)),
+                "מדרגת מס": f"{m_r*100:.0f}%"
+            })
+        
+        st.table(pd.DataFrame(spread_rows))
+        
+        tax_no_spread = taxable_grant * 0.47
+        st.markdown(f"**💰 חיסכון במס בזכות הפריסה:** <span style='color:green; font-size:1.2em;'>{fmt_num(tax_no_spread - total_tax_spread)}</span>", unsafe_allow_html=True)
 
     with tab4:
-        st.subheader("ניתוח כדאיות כלכלית")
+        st.subheader("השוואת מקסימום: הון מול חיסכון בקצבה")
         
-        # חישוב חיסכון מבוסס על סך כל הקצבאות (כולל ותיקה)
-        tax_no_exemp, _ = calculate_income_tax(all_future_pension_total, credit_points)
-        tax_with_selected_exemp, _ = calculate_income_tax(max(0, all_future_pension_total - selected_mon_exemp), credit_points)
+        # חישוב מקסימום חיסכון (100% לקצבה)
+        max_mon_exemp = rem_sal_base / 180
+        t_raw, _ = calculate_income_tax(all_future_pension_total, credit_points)
+        t_max_ex, _ = calculate_income_tax(max(0, all_future_pension_total - max_mon_exemp), credit_points)
+        max_total_15y_saving = (t_raw - t_max_ex) * 180
         
-        monthly_saving = tax_no_exemp - tax_with_selected_exemp
-        total_15y_saving = monthly_saving * 180
-
-        c_r1, c_r2 = st.columns(2)
-        c_r1.metric("הון פטור היום", fmt_num(rem_honi_ptur))
-        c_r2.metric("חיסכון מס ב-15 שנה", fmt_num(total_15y_saving))
+        # חישוב נוכחי לפי הסליידר
+        current_saving_15y = (t_raw - calculate_income_tax(max(0, all_future_pension_total - selected_mon_exemp), credit_points)[0]) * 180
 
         fig = go.Figure(data=[
-            go.Bar(name='הון מזומן פטור', x=['בחירה'], y=[rem_honi_ptur], marker_color='#2ecc71', text=fmt_num(rem_honi_ptur), textposition='auto'),
-            go.Bar(name='חיסכון מס מצטבר', x=['בחירה'], y=[total_15y_saving], marker_color='#3498db', text=fmt_num(total_15y_saving), textposition='auto')
+            go.Bar(name='מקסימום הון פטור אפשרי', x=['השוואת פוטנציאל'], y=[rem_sal_base], marker_color='#2ecc71', text=fmt_num(rem_sal_base), textposition='auto'),
+            go.Bar(name='מקסימום חיסכון במס (15 שנה)', x=['השוואת פוטנציאל'], y=[max_total_15y_saving], marker_color='#3498db', text=fmt_num(max_total_15y_saving), textposition='auto')
         ])
+        
+        fig.add_trace(go.Scatter(x=['השוואת פוטנציאל'], y=[current_saving_15y], name='חיסכון נוכחי (לפי בחירה)', mode='markers+text', text=[f"נוכחי: {fmt_num(current_saving_15y)}"], textposition="top center", marker=dict(color='red', size=12)))
+
         st.plotly_chart(fig, use_container_width=True)
-        st.write(f"החיסכון החודשי הצפוי בנטו שלך: **{fmt_num(monthly_saving)}**")
+        
+        st.write(f"**ניתוח כדאיות:** המקסימום שניתן לקבל במזומן היום הוא **{fmt_num(rem_sal_base)}**. מנגד, אם תבחר לנצל את מלוא הפטור לקצבה, שווי ההטבה המצטברת שלך ב-15 השנים הבאות עומד על **{fmt_num(max_total_15y_saving)}**.")
 
     st.divider()
-    st.markdown("<p style='text-align:center; font-size:0.8em; color:gray;'>אפקט סוכנות לביטוח - תכנון פרישה אסטרטגי</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align:center; color:gray; font-size:0.8em;'>אפקט סוכנות לביטוח - דיסקליימר: סימולציה בלבד לצרכי המחשה.</p>", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
