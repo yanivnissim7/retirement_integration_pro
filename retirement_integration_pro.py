@@ -91,4 +91,8 @@ def main():
         st.write(f"**ניתוח עבור:** {gender} בפרישה בגיל {age_at_ret:.1f}")
         if has_spouse:
             st.write(f"**כיסוי שאירים:** כולל בן/ת זוג ({spouse_gender})")
-        st.write(f"**תקופת הב
+        st.write(f"**תקופת הבטחה:** {guarantee} חודשים")
+        st.write("**מקור המקדם:** נספח ו', טבלה 1 (מותאם אישית)")
+
+if __name__ == "__main__":
+    main()
