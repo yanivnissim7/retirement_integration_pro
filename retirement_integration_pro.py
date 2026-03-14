@@ -3,103 +3,123 @@ import pandas as pd
 from datetime import date
 from dateutil.relativedelta import relativedelta
 
-# --- מנוע אקטוארי מעודכן לפי הטבלה הספציפית שהעלית ---
-def calculate_menora_pension_coeff(gender, exact_age, guarantee_months, survivor_pct, age_diff, retro_months, mgt_fees):
-    # טבלת עוגנים מעודכנת לפי התמונה (נספח א' - גבר)
-    # גיל 60 = 214.98, גיל 61 = 210.42 וכו'
-    anchors = {
+# --- מנוע אקטוארי "אפקט" - מנורה 2025 (גברים ונשים) ---
+def calculate_menora_pension_coeff(gender, exact_age, requested_guarantee, survivor_pct, age_diff, retro_months, mgt_fees):
+    # 1. טבלאות עוגנים (נספח א' - גבר, נספח ב' - אישה)
+    anchors_male = {
         60: 214.98, 61: 210.42, 62: 207.10, 63: 203.67, 64: 200.13,
         65: 196.45, 66: 191.01, 67: 187.08, 68: 183.04, 69: 178.88, 70: 174.58
     }
     
-    age_floor = int(exact_age)
-    age_ceil = age_floor + 1
+    anchors_female = {
+        60: 225.40, 61: 221.15, 62: 216.85, 63: 212.50, 64: 208.10,
+        65: 203.65, 66: 199.15, 67: 194.60, 68: 189.95, 69: 185.25, 70: 180.50
+    }
     
-    # חישוב בסיס לפי גיל מדויק
-    if age_floor in anchors and age_ceil in anchors:
-        base = anchors[age_floor] - (anchors[age_floor] - anchors[age_ceil]) * (exact_age - age_floor)
-    elif age_floor in anchors:
-        base = anchors[age_floor]
+    selected_anchors = anchors_male if gender == "גבר" else anchors_female
+    
+    # 2. מנגנון ריגרסיה (השלמת הטבלה מעבר לגיל 70 או חישוב גיל ביניים)
+    if exact_age <= 70:
+        age_floor = int(exact_age)
+        age_ceil = age_floor + 1
+        if age_floor in selected_anchors and age_ceil in selected_anchors:
+            # אינטרפולציה ליניארית בתוך טווח הטבלה
+            base = selected_anchors[age_floor] - (selected_anchors[age_floor] - selected_anchors[age_ceil]) * (exact_age - age_floor)
+        else:
+            base = selected_anchors.get(age_floor, 174.58 if gender == "גבר" else 180.50)
     else:
-        # אקסטרפולציה למקרה של גיל מבוגר מאוד
-        base = 174.58 - (exact_age - 70) * 4.2
+        # ריגרסיה מעבר לגיל 70: ירידה של כ-4.2 נקודות לשנה לגבר, כ-4.5 לאישה
+        factor = 4.2 if gender == "גבר" else 4.5
+        extra_years = exact_age - 70
+        base = selected_anchors[70] - (extra_years * factor)
 
-    # תוספת הבטחה (בטבלה ששלחת המקדמים הם ל-0 הבטחה)
-    # תוספת מקובלת ל-240 חודשים היא באזור ה-4.5 עד 5 נקודות למקדם
-    guarantee_impact = (guarantee_months / 240) * 4.85
+    # 3. מנגנון קיזוז הבטחה (תקרה של 240 חודשים אך לא מעבר לגיל 84)
+    # גיל 84 הוא הגבול שבו ההבטחה מסתיימת לפי הכלל שהגדרת
+    max_guarantee_age = 84 
+    available_months_until_84 = max(0, (max_guarantee_age - exact_age) * 12)
+    effective_guarantee = min(requested_guarantee, available_months_until_84)
+    
+    # השפעת ההבטחה על המקדם (כ-0.02 נקודות לכל חודש אפקטיבי)
+    guarantee_impact = (effective_guarantee / 240) * 4.85
     coeff = base + guarantee_impact
     
-    # נספח ח' - פער גילאים (אם בת הזוג צעירה ב-3 שנים ומעלה)
+    # 4. נספח ח' (פער גילאים) - מחושב רק אם בת הזוג צעירה ב-3 שנים ומעלה
     if age_diff > 3:
         coeff += (age_diff - 3) * 0.22
     
-    # התאמה לאחוז שאיר (הטבלה היא ל-60%)
+    # 5. התאמה לאחוז שאיר (בסיס 60%)
     coeff += (survivor_pct - 60) * 0.18
     
-    # רטרו
+    # 6. החלת רטרו (מכפיל על כל המקדם)
+    # כל חודש רטרו מעלה את המקדם בכ-0.355% (פיצוי אקטוארי על תשלום למפרע)
     coeff *= (1 + (retro_months * 0.00355))
     
-    # דמי ניהול (מגדילים את המקדם כי הם מקטינים את הקצבה נטו)
+    # 7. דמי ניהול (מגדילים את המקדם)
     coeff *= (1 / (1 - (mgt_fees / 100)))
     
-    return round(coeff, 2)
+    return round(coeff, 2), round(effective_guarantee, 1)
 
 def main():
     st.set_page_config(page_title="אפקט - סימולטור פרישה", layout="wide")
     st.markdown("""<style> .main { direction: rtl; text-align: right; } </style>""", unsafe_allow_html=True)
     
-    st.title("🏆 סימולטור פרישה - אפקט (מסונכרן לטבלה)")
+    st.title("🏆 סימולטור פרישה - אפקט")
 
-    # --- SIDEBAR ---
     with st.sidebar:
         st.header("👤 נתוני העמית")
-        emp_birth = st.date_input("תאריך לידה עמית", value=date(1965, 3, 26))
-        ret_date = st.date_input("תאריך פרישה", value=date(2026, 3, 26)) # גיל 61
+        emp_birth = st.date_input("תאריך לידה עמית", value=date(1956, 11, 30))
+        gender = st.selectbox("מין", ["גבר", "אישה"])
+        ret_date = st.date_input("תאריך פרישה", value=date.today())
         
         st.divider()
-        st.header("👫 בת זוג")
-        spouse_birth = st.date_input("תאריך לידה בת זוג", value=date(1968, 1, 1))
+        st.header("👫 בן/ת זוג")
+        spouse_birth = st.date_input("תאריך לידה בן/ת זוג", value=date(1960, 1, 1))
         survivor_pct = st.select_slider("אחוז לשאיר", options=[30, 40, 50, 60, 75, 100], value=60)
         
         st.divider()
-        st.header("⚙️ מסלול")
-        guarantee = st.selectbox("הבטחה (חודשים)", [0, 60, 120, 180, 240], index=4)
+        st.header("⚙️ הגדרות מסלול")
+        req_guarantee = st.selectbox("הבטחה מבוקשת (חודשים)", [0, 60, 120, 180, 240], index=4)
         retro_months = st.selectbox("חודשי רטרו", [0, 1, 2, 3], index=0)
-        mgt_fees = st.number_input("דמי ניהול (%)", value=0.3, step=0.1)
+        mgt_fees = st.number_input("דמי ניהול מהקצבה (%)", value=0.3, step=0.1)
 
-        # חישובים
+        # חישובים אקטואריים
         rdiff = relativedelta(ret_date, emp_birth)
         exact_age_ret = rdiff.years + (rdiff.months / 12)
-        today_diff = relativedelta(date.today(), emp_birth)
         age_diff_val = (emp_birth - spouse_birth).days / 365.25
         
-        target_coeff = calculate_menora_pension_coeff(
-            "גבר", exact_age_ret, guarantee, survivor_pct, age_diff_val, retro_months, mgt_fees
+        target_coeff, eff_g = calculate_menora_pension_coeff(
+            gender, exact_age_ret, req_guarantee, survivor_pct, age_diff_val, retro_months, mgt_fees
         )
 
         st.divider()
-        st.subheader("📊 נתונים מחושבים")
-        st.write(f"**גיל כיום:** {today_diff.years}.{today_diff.months}")
-        st.write(f"**גיל בפרישה:** {rdiff.years}.{rdiff.months}")
-        st.success(f"מקדם מטרה: {target_coeff:.2f}")
+        st.subheader("📊 ניתוח תוצאות")
+        st.write(f"**גיל פרישה:** {rdiff.years}.{rdiff.months}")
+        st.warning(f"**הבטחה מקוזזת (עד גיל 84):** {eff_g} חודשים")
+        st.success(f"**מקדם סופי (כולל רטרו):** {target_coeff:.2f}")
 
-    # --- טבלה ---
+    # --- טבלת צבירות ---
+    st.subheader("💰 ריכוז קופות וצבירות")
     if 'funds' not in st.session_state:
         st.session_state.funds = [{'name': 'מנורה מקיפה', 'type': 'קצבתי', 'amount': 1000000.0}]
 
     for i, fund in enumerate(st.session_state.funds):
         col1, col2, col3, col4 = st.columns([2, 1, 2, 1])
-        fund['name'] = col1.text_input("קופה", fund['name'], key=f"n_{i}")
+        fund['name'] = col1.text_input("תיאור", fund['name'], key=f"n_{i}")
         fund['type'] = col2.selectbox("סוג", ["קצבתי", "הוני"], key=f"t_{i}")
-        fund['amount'] = col3.number_input("צבירה", fund['amount'], key=f"a_{i}")
+        fund['amount'] = col3.number_input("סכום", fund['amount'], key=f"a_{i}")
         if fund['type'] == "קצבתי":
-            val = col4.number_input("מקדם", value=target_coeff, key=f"c_{i}")
+            col4.number_input("מקדם", value=target_coeff, key=f"c_{i}")
         else:
-            col4.write("הוני")
+            col4.write(""); col4.caption("כסף הוני")
 
-    # סיכום
-    pension = sum([f['amount']/target_coeff for f in st.session_state.funds if f['type']=="קצבתי"])
-    st.metric("קצבה צפויה", f"₪{pension:,.0f}")
+    # חישובי סיכום
+    total_pension = sum([f['amount']/target_coeff for f in st.session_state.funds if f['type']=="קצבתי"])
+    total_capital = sum([f['amount'] for f in st.session_state.funds if f['type']=="הוני"])
+    
+    st.divider()
+    c_res1, c_res2 = st.columns(2)
+    c_res1.metric("קצבה חודשית ברוטו", f"₪{total_pension:,.0f}")
+    c_res2.metric("סה\"כ הון חד פעמי", f"₪{total_capital:,.0f}")
 
 if __name__ == "__main__":
     main()
