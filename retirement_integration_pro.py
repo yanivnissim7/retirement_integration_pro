@@ -4,93 +4,111 @@ from datetime import date
 from dateutil.relativedelta import relativedelta
 
 def main():
-    st.set_page_config(page_title="אפקט - תכנון פרישה אסטרטגי", layout="wide")
-    st.title("🏆 מערכת 'אפקט' - תכנון פרישה מלא")
+    st.set_page_config(page_title="אפקט - דוח פרישה מלא", layout="wide")
+    st.title("🏆 מערכת 'אפקט' - תכנון פרישה אסטרטגי")
 
-    # --- הגדרות טווח גילאים (18-90) ---
+    # --- נתוני בסיס (גילאי 18-90) ---
     today = date.today()
     min_birth = today - relativedelta(years=90)
     max_birth = today - relativedelta(years=18)
 
-    # --- SIDEBAR ---
     with st.sidebar:
         st.header("👤 פרטי לקוח")
         emp_name = st.text_input("שם מלא", "ישראל ישראלי")
         birth_date = st.date_input("תאריך לידה", value=date(1965, 11, 26), min_value=min_birth, max_value=max_birth)
         ret_date = st.date_input("תאריך פרישה", value=date(2026, 11, 26))
-        
         rdiff = relativedelta(ret_date, birth_date)
         st.info(f"גיל בפרישה: {rdiff.years}.{rdiff.months}")
-        
-        st.divider()
-        st.header("👫 בן/ת זוג")
-        spouse_birth = st.date_input("תאריך לידה בן/ת זוג", value=date(1968, 11, 26), min_value=min_birth, max_value=max_birth)
 
-    # --- טאבים לניהול התהליך ---
-    tab1, tab2, tab3, tab4 = st.tabs(["💰 ריכוז קופות", "📑 קיבוע זכויות (161ד)", "📉 פריסת מס וכדאיות", "📋 סיכום דוח"])
+    # --- חלק 1: ריכוז קופות וצבירות ---
+    st.header("💰 1. ריכוז קופות וצבירות (הזנה ידנית)")
+    if 'funds' not in st.session_state:
+        st.session_state.funds = [{'name': 'מנורה מבטחים', 'type': 'קצבתי', 'amount': 1000000.0, 'coeff': 197.10}]
 
-    with tab1:
-        st.subheader("ריכוז צבירות ומקדמים (הזנה ידנית)")
-        if 'funds' not in st.session_state:
-            st.session_state.funds = [{'name': 'מנורה מבטחים', 'type': 'קצבתי', 'amount': 1000000.0, 'coeff': 197.10}]
+    col_btns = st.columns([1, 1, 4])
+    if col_btns[0].button("➕ הוסף קופה"):
+        st.session_state.funds.append({'name': '', 'type': 'קצבתי', 'amount': 0.0, 'coeff': 200.0})
+        st.rerun()
+    if col_btns[1].button("🗑️ נקה הכל"):
+        st.session_state.funds = []
+        st.rerun()
 
-        if st.button("➕ הוסף קופה/קרן"):
-            st.session_state.funds.append({'name': '', 'type': 'קצבתי', 'amount': 0.0, 'coeff': 200.0})
-            st.rerun()
+    total_pension = 0.0
+    total_capital = 0.0
+    
+    # הצגת הקופות בטבלה ערוכה
+    for i, fund in enumerate(st.session_state.funds):
+        c1, c2, c3, c4 = st.columns([2, 1, 2, 1])
+        fund['name'] = c1.text_input(f"שם קופה {i+1}", fund.get('name',''), key=f"n_{i}")
+        fund['type'] = c2.selectbox("סוג", ["קצבתי", "הוני"], index=0 if fund.get('type')=='קצבתי' else 1, key=f"t_{i}")
+        fund['amount'] = c3.number_input("צבירה (₪)", value=float(fund.get('amount',0)), key=f"a_{i}")
+        if fund['type'] == 'קצבתי':
+            fund['coeff'] = c4.number_input("מקדם", value=float(fund.get('coeff',200)), key=f"c_{i}")
+            total_pension += fund['amount'] / fund['coeff'] if fund['coeff'] > 0 else 0
+        else:
+            total_capital += fund['amount']
 
-        total_pension = 0.0
-        total_capital = 0.0
-        
-        for i, fund in enumerate(st.session_state.funds):
-            with st.expander(f"קופה {i+1}: {fund.get('name','')}", expanded=True):
-                c1, c2, c3, c4 = st.columns([2, 1, 2, 1])
-                fund['name'] = c1.text_input("שם קופה", fund.get('name',''), key=f"n_{i}")
-                fund['type'] = c2.selectbox("סוג", ["קצבתי", "הוני"], index=0 if fund.get('type')=='קצבתי' else 1, key=f"t_{i}")
-                fund['amount'] = c3.number_input("צבירה (₪)", value=float(fund.get('amount',0)), key=f"a_{i}")
-                
-                if fund['type'] == 'קצבתי':
-                    fund['coeff'] = c4.number_input("מקדם", value=float(fund.get('coeff',200)), key=f"c_{i}")
-                    total_pension += fund['amount'] / fund['coeff'] if fund['coeff'] > 0 else 0
-                else:
-                    total_capital += fund['amount']
+    st.divider()
 
-    with tab2:
-        st.subheader("קיבוע זכויות - סל הפטור (טופס 161ד)")
-        c1, c2 = st.columns(2)
-        with c1:
-            grant_amount = st.number_input("מענקים פטורים שנתקבלו (15 שנה אחרונות)", value=0.0)
-            st.write("תקרת הפטור ל-2025: ₪882,648")
-        with c2:
-            multiplier = 1.35
-            consumed_limit = grant_amount * multiplier
-            remaining_limit = max(0, 882648 - consumed_limit)
-            st.metric("יתרת סל פטור להיוון/קצבה", f"₪{remaining_limit:,.0f}")
+    # --- חלק 2: קיבוע זכויות (סל הפטור) ---
+    st.header("📑 2. קיבוע זכויות - סל הפטור (161ד)")
+    col_k1, col_k2 = st.columns(2)
+    with col_k1:
+        grant_amount = st.number_input("מענקים פטורים שנתקבלו (15 שנה אחרונות)", value=0.0)
+        pension_limit_2025 = 882648  # תקרת הפטור
+    with col_k2:
+        multiplier = 1.35
+        consumed = grant_amount * multiplier
+        remaining = max(0, pension_limit_2025 - consumed)
+        st.metric("יתרת סל פטור להיוון/קצבה", f"₪{remaining:,.0f}")
+        st.caption(f"ניצול סל: ₪{consumed:,.0f} מתוך ₪{pension_limit_2025:,.0f}")
 
-    with tab3:
-        st.subheader("פריסת מס וכדאיות כלכלית")
-        col_f1, col_f2 = st.columns(2)
-        with col_f1:
-            spread_type = st.radio("סוג פריסה מבוקש", ["קדימה (על מענק פרישה)", "אחורה (על הפרשי שכר)"])
-            spread_years = st.slider("מספר שנות פריסה", 1, 6, 6)
-        with col_f2:
-            marginal_tax = st.number_input("מדרגת מס שולית צפויה (%)", value=20)
-            st.info("בדיקת כדאיות: יחס המרה קצבה מול הון")
-            if total_capital > 0:
-                annuity_ratio = (total_pension * 12) / total_capital
-                st.write(f"תשואת קצבה שנתית: {annuity_ratio:.2%}")
+    st.divider()
 
-    with tab4:
-        st.subheader("סיכום נתוני פרישה")
-        res1, res2, res3 = st.columns(3)
-        res1.metric("קצבה חודשית ברוטו", f"₪{total_pension:,.2f}")
-        res2.metric("סה\"כ הון חד פעמי", f"₪{total_capital:,.0f}")
-        res3.metric("יתרת פטור בקיבוע", f"₪{remaining_limit:,.0f}")
+    # --- חלק 3: טבלת פריסה וכדאיות ---
+    st.header("📉 3. פריסת מס וכדאיות כלכלית")
+    col_p1, col_p2 = st.columns([2, 1])
+    with col_p1:
+        st.write("**טבלת פריסת מס (הערכה):**")
+        spread_years = st.slider("שנות פריסה", 1, 6, 6)
+        tax_data = []
+        for y in range(1, spread_years + 1):
+            tax_data.append({"שנה": f"שנה {y}", "הכנסה צפויה": f"₪{total_pension*12/spread_years:,.0f}", "מס משוער": "לפי מדרגות"})
+        st.table(pd.DataFrame(tax_data))
+    
+    with col_p2:
+        marginal_tax = st.number_input("מדרגת מס שולית (%)", value=20)
+        if total_capital > 0:
+            annuity_ratio = (total_pension * 12) / total_capital
+            st.metric("תשואת קצבה שנתית (ROI)", f"{annuity_ratio:.2%}")
 
-        st.divider()
-        if st.button("💾 שמור נתונים לייצוא"):
-            df_export = pd.DataFrame(st.session_state.funds)
-            csv = df_export.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-            st.download_button("📥 הורד קובץ נתונים לאקסל", data=csv, file_name=f"Report_{emp_name}.csv")
+    st.divider()
+
+    # --- חלק 4: סיכום והדפסה ---
+    st.header("📋 4. סיכום דוח סופי")
+    s1, s2, s3 = st.columns(3)
+    s1.metric("קצבה חודשית ברוטו", f"₪{total_pension:,.2f}")
+    s2.metric("סה\"כ הון חד פעמי", f"₪{total_capital:,.0f}")
+    s3.metric("יתרת פטור בקיבוע", f"₪{remaining:,.0f}")
+
+    # כפתור הדפסה בשיטת HTML
+    report_html = f"""
+    <div style="direction:rtl; text-align:right; font-family:Arial; padding:20px; border:1px solid #ccc;">
+        <h2>דוח תכנון פרישה - אפקט</h2>
+        <p><b>שם הלקוח:</b> {emp_name}</p>
+        <p><b>גיל פרישה:</b> {rdiff.years}.{rdiff.months}</p>
+        <hr>
+        <h3>שורה תחתונה:</h3>
+        <ul>
+            <li>קצבה חודשית ברוטו: ₪{total_pension:,.2f}</li>
+            <li>הון חד פעמי: ₪{total_capital:,.0f}</li>
+            <li>יתרת סל פטור: ₪{remaining:,.0f}</li>
+        </ul>
+    </div>
+    """
+    
+    if st.button("🖨️ הכן דוח להדפסה"):
+        st.components.v1.html(report_html + "<script>window.print();</script>", height=400)
 
 if __name__ == "__main__":
     main()
