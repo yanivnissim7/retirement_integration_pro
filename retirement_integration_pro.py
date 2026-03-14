@@ -3,10 +3,9 @@ import pandas as pd
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
-# --- מנוע מקדמים "אפקט" - כיול סופי ומדויק ---
+# --- מנוע מקדמים "אפקט" - כיול סופי ---
 def calculate_accurate_phoenix_coeff(gender, exact_age, guarantee, spouse_gender, spouse_birth, emp_birth, survivor_pct, retro_months, mgt_fees):
     if gender == 'גבר':
-        # תיקון קל בבסיס לסגירת הסטייה האחרונה
         base = 191.28 + (65 - exact_age) * 3.72
     else:
         base = 210.50 + (62 - exact_age) * 3.75
@@ -21,13 +20,9 @@ def calculate_accurate_phoenix_coeff(gender, exact_age, guarantee, spouse_gender
         coeff -= (abs(age_diff) - 3) * 0.13
     
     coeff += (survivor_pct - 60) * 0.182
-    
-    # כיול רטרו עדין לסגירת ה-0.12
     retro_factor = 1 + (retro_months * 0.00355) 
     coeff *= retro_factor
-    
-    mgt_fee_factor = 1 / (1 - (mgt_fees / 100))
-    coeff *= mgt_fee_factor
+    coeff *= (1 / (1 - (mgt_fees / 100)))
     
     return coeff
 
@@ -56,62 +51,68 @@ def main():
         retro_months = st.selectbox("חודשי רטרו", [0, 1, 2, 3], index=3)
         mgt_fees = st.number_input("דמי ניהול מהקצבה (%)", value=0.3, step=0.1)
 
-    # חישוב המקדם המרכזי
-    rdiff = relativedelta(ret_date, emp_birth)
-    exact_age = rdiff.years + (rdiff.months / 12)
-    calculated_main_coeff = calculate_accurate_phoenix_coeff(
-        gender, exact_age, guarantee, spouse_gender, spouse_birth, emp_birth, survivor_pct, retro_months, mgt_fees
-    )
+        # --- הנתון הצדי שביקשת ---
+        st.divider()
+        rdiff = relativedelta(ret_date, emp_birth)
+        exact_age = rdiff.years + (rdiff.months / 12)
+        current_calc_coeff = calculate_accurate_phoenix_coeff(
+            gender, exact_age, guarantee, spouse_gender, spouse_birth, emp_birth, survivor_pct, retro_months, mgt_fees
+        )
+        
+        st.subheader("📌 מקדם מטרה (אפקט)")
+        st.markdown(f"""
+        <div style="background-color:#f0f2f6; padding:20px; border-radius:10px; border:2px solid #ff4b4b; text-align:center;">
+            <h1 style="color:#1f1f1f; margin:0;">{current_calc_coeff:.2f}</h1>
+            <small>הזן נתון זה בטבלה עבור הקופה הרלוונטית</small>
+        </div>
+        """, unsafe_allow_html=True)
 
     # --- מרכז המסך - ניהול קופות וכספים ---
-    st.subheader("💰 פירוט קופות וצבירות")
+    st.subheader("💰 ריכוז קופות וצבירות")
     
-    # יצירת טבלה דינמית להזנת נתונים
     if 'funds' not in st.session_state:
-        st.session_state.funds = [{'name': 'קרן פנסיה מקיפה', 'type': 'קצבתי', 'amount': 1000000.0, 'coeff': calculated_main_coeff}]
+        st.session_state.funds = [{'name': 'קרן פנסיה', 'type': 'קצבתי', 'amount': 1000000.0, 'coeff': current_calc_coeff}]
 
-    def add_fund():
-        st.session_state.funds.append({'name': '', 'type': 'קצבתי', 'amount': 0.0, 'coeff': calculated_main_coeff})
+    col_btn1, col_btn2 = st.columns([1, 5])
+    with col_btn1:
+        if st.button("➕ הוסף קופה"):
+            st.session_state.funds.append({'name': '', 'type': 'קצבתי', 'amount': 0.0, 'coeff': current_calc_coeff})
+    with col_btn2:
+        if st.button("🗑️ נקה הכל"):
+            st.session_state.funds = []
+            st.rerun()
 
-    # כפתור הוספת קופה
-    st.button("➕ הוסף קופה/קופת גמל", on_click=add_fund)
-
-    edited_funds = []
     total_pension = 0.0
+    total_assets = 0.0
 
+    # תצוגת הקופות בפורמט נוח
     for i, fund in enumerate(st.session_state.funds):
-        col1, col2, col3, col4 = st.columns([2, 1, 2, 1])
-        with col1:
-            name = st.text_input(f"שם הקופה #{i+1}", value=fund['name'], key=f"name_{i}")
-        with col2:
-            f_type = st.selectbox(f"סוג", ["קצבתי", "הוני"], index=0 if fund['type'] == 'קצבתי' else 1, key=f"type_{i}")
-        with col3:
-            amount = st.number_input(f"צבירה (₪)", value=fund['amount'], step=10000.0, key=f"amount_{i}")
-        with col4:
-            # המקדם כברירת מחדל הוא מה שחישבנו, אבל ניתן לדרוס אותו
-            coeff = st.number_input(f"מקדם", value=fund['coeff'], format="%.2f", key=f"coeff_{i}")
-        
-        pension_contribution = amount / coeff if f_type == 'קצבתי' and coeff > 0 else 0
-        total_pension += pension_contribution
-        edited_funds.append({'name': name, 'type': f_type, 'amount': amount, 'coeff': coeff, 'pension': pension_contribution})
+        with st.container():
+            c1, c2, c3, c4, c5 = st.columns([2, 1, 2, 1, 1])
+            with c1:
+                fund['name'] = st.text_input(f"שם הקופה", value=fund['name'], key=f"n_{i}")
+            with c2:
+                fund['type'] = st.selectbox(f"סוג", ["קצבתי", "הוני"], index=0 if fund['type'] == 'קצבתי' else 1, key=f"t_{i}")
+            with c3:
+                fund['amount'] = st.number_input(f"צבירה (₪)", value=fund['amount'], step=10000.0, key=f"a_{i}")
+            with c4:
+                # כאן המשתמש מזין את המקדם שמופיע לו בצד
+                fund['coeff'] = st.number_input(f"מקדם", value=fund['coeff'], format="%.2f", key=f"c_{i}")
+            with c5:
+                p_val = fund['amount'] / fund['coeff'] if fund['type'] == 'קצבתי' and fund['coeff'] > 0 else 0
+                st.write("**קצבה צפויה:**")
+                st.write(f"₪{p_val:,.0f}")
+                total_pension += p_val
+                total_assets += fund['amount']
 
-    st.divider()
-
-    # --- סיכום דוח פרישה ---
-    st.subheader("📊 סיכום הערכת קצבה חודשית")
+    st.markdown("---")
     
-    res_c1, res_c2, res_c3 = st.columns(3)
-    with res_c1:
-        st.metric("סה\"כ קצבה חודשית (ברוטו)", f"₪{total_pension:,.0f}")
-    with res_c2:
-        total_assets = sum(f['amount'] for f in edited_funds)
-        st.metric("סה\"כ הון מנוהל", f"₪{total_assets:,.0f}")
-    with res_c3:
-        st.metric("מקדם משוקלל ממוצע", f"{(total_assets/total_pension if total_pension > 0 else 0):.2f}")
-
-    st.write("---")
-    st.write("**פירוט לחישוב אקטוארי (אפקט):**")
-    st.write(f"גיל פרישה: {rdiff.years}.{rdiff.months} | פער גילאים: {(emp_birth - spouse_birth).days/365.25:.1f} שנים | דמי ניהול: {mgt_fees}%")
+    # סיכום סופי
+    res1, res2, res3 = st.columns(3)
+    res1.metric("סה\"כ קצבה חודשית (ברוטו)", f"₪{total_pension:,.0f}")
+    res2.metric("סה\"כ הון מנוהל", f"₪{total_assets:,.0f}")
+    avg_coeff = total_assets / total_pension if total_pension > 0 else 0
+    res3.metric("מקדם משוקלל לתיק", f"{avg_coeff:.2f}")
 
 if __name__ == "__main__":
     main()
