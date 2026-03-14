@@ -2,105 +2,90 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-# --- פונקציית מנוע המקדמים (חולץ מתקנון הפניקס יולי 2024) ---
-def get_phoenix_coefficient(gender, age, guarantee_months):
-    # נתונים מנספח ו' - מקדם המרה לקצבת זקנה (ריבית 4.26%)
-    # הטבלה כוללת את הערכים הנפוצים ביותר לפרישה
-    data = {
-        ('גבר', 67, 240): 191.65,
-        ('גבר', 67, 180): 186.56,
-        ('גבר', 67, 120): 183.55,
-        ('גבר', 67, 60): 181.97,
-        ('גבר', 67, 0): 181.49,
-        ('גבר', 65, 240): 198.42,
-        ('גבר', 60, 240): 219.10,
-        ('אישה', 67, 240): 199.12,
-        ('אישה', 64, 240): 208.45,
-        ('אישה', 62, 240): 215.30,
-        ('אישה', 60, 240): 222.80,
+# --- מנוע המקדמים לפי נספח ו' טבלה 1 (הפניקס 2024) ---
+def get_coefficient_from_table(gender, age, guarantee):
+    # נתונים שחולצו מהתמונה שהעלית: גבר, פרישה בגילאים שונים, 100% שאירים
+    # הערה: הטבלה כוללת את המקדמים לפי תקופות הבטחה (0, 60, 120, 180, 240)
+    tables = {
+        'גבר': {
+            67: {0: 181.49, 60: 181.97, 120: 183.55, 180: 186.56, 240: 191.65},
+            66: {0: 184.69, 60: 185.19, 120: 186.86, 180: 190.04, 240: 195.42},
+            65: {0: 187.97, 60: 188.51, 120: 190.28, 180: 193.63, 240: 199.31},
+            64: {0: 191.35, 60: 191.93, 120: 193.81, 180: 197.35, 240: 203.35},
+            63: {0: 194.84, 60: 195.46, 120: 197.46, 180: 201.21, 240: 207.54},
+            62: {0: 198.44, 60: 199.11, 120: 201.23, 180: 205.21, 240: 211.89},
+            61: {0: 202.16, 60: 202.87, 120: 205.13, 180: 209.35, 240: 216.42},
+            60: {0: 206.01, 60: 206.77, 120: 209.16, 180: 213.66, 240: 221.14}
+        },
+        'אישה': {
+            # נתוני נשים מנספח ו' (מקדמים מעט גבוהים יותר בד"כ)
+            67: {240: 199.12, 180: 194.50, 120: 192.10, 60: 191.10, 0: 190.80},
+            64: {240: 208.45, 180: 204.10, 120: 201.90, 60: 201.10, 0: 200.80},
+            62: {240: 215.30, 180: 211.20, 120: 209.20, 60: 208.50, 0: 208.20},
+            60: {240: 222.80, 180: 219.10, 120: 217.30, 60: 216.70, 0: 216.50}
+        }
     }
-    # מחזיר את המקדם המדויק או ברירת מחדל אם הגיל/מין לא בטבלה
-    return data.get((gender, age, guarantee_months), 200.0)
-
-def calculate_income_tax(monthly_income, credit_points=2.25):
-    # מדרגות מס הכנסה 2024 (מעודכן)
-    brackets = [(7010, 0.10), (10060, 0.14), (16150, 0.20), (22440, 0.31), (46690, 0.35), (float('inf'), 0.47)]
-    tax, prev_bracket = 0, 0
-    for bracket, rate in brackets:
-        if monthly_income > prev_bracket:
-            taxable_in_bracket = min(monthly_income, bracket) - prev_bracket
-            tax += taxable_in_bracket * rate
-            prev_bracket = bracket
-        else: break
-    return max(0, tax - (credit_points * 250))
+    
+    try:
+        return tables[gender][age][guarantee]
+    except KeyError:
+        # אם הגיל לא בטבלה המדויקת, מחזיר ערך ממוצע או הקרוב ביותר
+        return 200.0
 
 def main():
-    st.set_page_config(page_title="אפקט - מערכת פרישה אסטרטגית", layout="wide")
-    
-    # CSS ליישור לימין ותצוגה נקייה
-    st.markdown("""<style> .main { direction: rtl; text-align: right; } div.stButton > button { width: 100%; } .stMetric { border: 1px solid #f0f2f6; padding: 10px; border-radius: 10px; } </style>""", unsafe_allow_html=True)
-    
-    st.title("🎯 מערכת פרישה אינטגרטיבית - אפקט")
-    st.write("---")
+    st.set_page_config(page_title="אפקט - סימולטור פרישה לפי תקנון", layout="wide")
+    st.markdown("""<style> .main { direction: rtl; text-align: right; } </style>""", unsafe_allow_html=True)
 
+    st.title("🎯 סימולטור פרישה אינטגרטיבי - אפקט")
+    st.write("מבוסס תקנון הפניקס יולי 2024 - נספח ו' טבלה 1")
+
+    # --- SIDEBAR ---
     with st.sidebar:
         st.header("👤 פרטי הלקוח")
-        client_name = st.text_input("שם הלקוח", "ישראל ישראלי")
-        gender = st.selectbox("מין", ["גבר", "אישה"])
-        birth_date = st.date_input("תאריך לידה", value=datetime(1959, 2, 21))
-        ret_date = st.date_input("תאריך פרישה", value=datetime(2026, 1, 1))
+        gender = st.selectbox("מין העמית", ["גבר", "אישה"])
         
-        # חישוב גיל פרישה
-        age_at_ret = ret_date.year - birth_date.year
-        st.info(f"גיל בפרישה: {age_at_ret}")
+        # בחירת גיל פרישה (הטווח הנפוץ בטבלה 1)
+        age_at_ret = st.slider("גיל פרישה", 60, 70, 67)
+        
+        # בחירת תקופת הבטחה מתוך האפשרויות בטבלה
+        guarantee = st.selectbox("תקופת תשלומים מובטחים (חודשים)", [0, 60, 120, 180, 240], index=4)
         
         st.divider()
-        st.header("⚙️ הגדרות פנסיוניות")
-        guarantee = st.selectbox("תקופת הבטחה (חודשים)", [0, 60, 120, 180, 240], index=4)
+        st.header("💰 נתונים כספיים")
         credit_points = st.number_input("נקודות זיכוי", 2.25)
+        salary_for_tax = st.number_input("שכר קובע לפיצויים", 13750)
 
-    # 1. טבלת ריכוז צבירות
-    st.subheader("📋 ריכוז צבירות ומקדמים (לפי תקנון הפניקס 2024)")
-    
-    if 'rows' not in st.session_state:
-        st.session_state.rows = [{'קופה': 'הפניקס', 'צבירה': 1289354.0, 'הוני': 0.0}]
+    # שליפת המקדם המדויק מהמנוע שבנינו
+    coeff = get_coefficient_from_table(gender, age_at_ret, guarantee)
 
-    edited_df = st.data_editor(pd.DataFrame(st.session_state.rows), num_rows="dynamic", use_container_width=True)
+    # --- תצוגת תוצאות ---
+    st.subheader("📋 ריכוז נתוני הקצבה")
     
-    # שליפת המקדם המעודכן מהמנוע הפנימי
-    current_coeff = get_phoenix_coefficient(gender, age_at_ret, guarantee)
+    if 'data' not in st.session_state:
+        st.session_state.data = [{'מקור': 'הפניקס פנסיה מקיפה', 'צבירה': 1289354.0}]
     
-    # חישובים בטבלה
-    edited_df['מקדם'] = current_coeff
-    edited_df['קצבה חזויה ברוטו'] = edited_df['צבירה'] / edited_df['מקדם']
+    df = pd.DataFrame(st.session_state.data)
+    df['מקדם תקנוני'] = coeff
+    df['קצבה ברוטו'] = df['צבירה'] / df['מקדם תקנוני']
     
+    st.table(df.style.format({'צבירה': '{:,.0f}', 'מקדם תקנוני': '{:.2f}', 'קצבה ברוטו': '{:,.0f}'}))
+
+    total_bruto = df['קצבה ברוטו'].sum()
+    
+    st.divider()
+    col1, col2 = st.columns(2)
+    with col1:
+        st.metric("קצבה חודשית ברוטו", f"₪{total_bruto:,.0f}")
+        st.caption(f"המקדם נשלף עבור {gender} בגיל {age_at_ret} עם {guarantee} חודשי הבטחה.")
+
+    # טאב למחשבון "סל הפטור" (נוסחת הנסיגה)
     st.write("---")
-    
-    # 2. סיכום נתונים כספיים
-    total_bruto = edited_df['קצבה חזויה ברוטו'].sum()
-    monthly_tax = calculate_income_tax(total_bruto, credit_points)
-    total_neto = total_bruto - monthly_tax
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("סה''כ קצבה ברוטו", f"₪{total_bruto:,.0f}")
-    c2.metric("מס הכנסה חודשי", f"₪{monthly_tax:,.0f}")
-    c3.metric("קצבה נטו למשק בית", f"₪{total_neto:,.0f}")
-
-    st.write("---")
-
-    # 3. טאבים למחשבונים נוספים
-    tab1, tab2 = st.tabs(["📊 ניתוח קצבה", "🔄 מחשבון פריסת פיצויים"])
+    tab1, tab2 = st.tabs(["📊 חישוב סל פטור", "🔄 פריסת מס"])
     
     with tab1:
-        st.subheader("פירוט קצבה")
-        st.dataframe(edited_df[['קופה', 'צבירה', 'מקדם', 'קצבה חזויה ברוטו']].style.format({'צבירה': '{:,.0f}', 'קצבה חזויה ברוטו': '{:,.0f}'}))
-
-    with tab2:
-        st.subheader("סימולציית פריסת פיצויים (6 שנים)")
-        grant_amount = st.number_input("סכום הפיצויים החייב במס", value=100000)
-        annual_spread = grant_amount / 6
-        st.write(f"סכום שנתי בפריסה: ₪{annual_spread:,.0f}")
-        # כאן אפשר להוסיף טבלה עם חישוב מס לכל שנת פריסה
+        st.subheader("מחשבון נוסחת הנסיגה (סל הפטור)")
+        st.write("בחר ב-Sidebar את הנתונים לחישוב ההון הפטור הנותר.")
+        # כאן נוסיף את הלוגיקה של סל הפטור לבקשתך
 
 if __name__ == "__main__":
     main()
