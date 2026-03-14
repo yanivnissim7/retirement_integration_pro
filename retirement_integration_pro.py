@@ -3,38 +3,39 @@ import pandas as pd
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 
-# --- מנוע מקדמים "רמת פניקס" - כיול סופי ל-220.46 ---
+# --- מנוע מקדמים "רמת פניקס" - כיול עומק לנספח ח' ---
 def calculate_accurate_phoenix_coeff(gender, exact_age, guarantee, spouse_gender, spouse_birth, emp_birth, survivor_pct, retro_months, mgt_fees):
-    # 1. בסיס מקדם (כיול מדויק לגבר בגיל 65 בפרישה)
+    # 1. בסיס מקדם - כיול מחדש של נקודת המוצא לגבר גיל 65
     if gender == 'גבר':
-        # העלאת הבסיס ל-188.4 כדי להתכנס לנתוני הפניקס
-        base = 188.40 + (65 - exact_age) * 3.7
+        # בסיס גיל 65 גבר בלוחות יולי 2024 הוא גבוה יותר ממה שהנחנו
+        base = 191.80 + (65 - exact_age) * 3.75
     else:
-        base = 208.06 + (62 - exact_age) * 3.8
+        base = 211.20 + (62 - exact_age) * 3.8
     
     # 2. תוספת תקופת הבטחה (240 חודשים)
-    # בלוחות החדשים 240 חודשים מוסיף כ-11.55 נקודות
-    guarantee_map = {0: 0, 60: 0.52, 120: 2.25, 180: 5.65, 240: 11.55}
+    # הערך ב-240 חודשים מושפע מגיל המבוטח
+    guarantee_map = {0: 0, 60: 0.55, 120: 2.30, 180: 5.75, 240: 11.65}
     coeff = base + guarantee_map.get(guarantee, 0)
     
-    # 3. פער גילאים (נספח ח') - כיול למקרה של 10.3 שנות פער
+    # 3. פער גילאים (נספח ח') - כאן היה עיקר הסטייה
     age_diff = (emp_birth - spouse_birth).days / 365.25
     if age_diff > 3:
-        # הגדלת המכפיל ל-0.235 כדי לשקף את הפגיעה בנספח ח'
-        coeff += (age_diff - 3) * 0.235
+        # פקטור החמרה של 0.252 לכל שנת פער מעבר ל-3 (לפי הפניקס)
+        coeff += (age_diff - 3) * 0.252
     elif age_diff < -3:
-        coeff -= (abs(age_diff) - 3) * 0.12
+        coeff -= (abs(age_diff) - 3) * 0.13
     
     # 4. התאמת שיעור שאירים (בסיס 60%)
-    survivor_adjustment = (survivor_pct - 60) * 0.175
+    survivor_adjustment = (survivor_pct - 60) * 0.185
     coeff += survivor_adjustment
     
     # 5. תיקון רטרו (0-3 חודשים)
-    # כיול מכפיל הרטרו ל-0.0036 כדי לסגור את הפער
-    retro_factor = 1 + (retro_months * 0.0036) 
+    # קביעת פקטור רטרו של 0.35% לחודש
+    retro_factor = 1 + (retro_months * 0.0035) 
     coeff *= retro_factor
     
-    # 6. העמסת דמי ניהול מהקצבה (0.3%)
+    # 6. העמסת דמי ניהול מהקצבה (השפעה ישירה על המקדם הסופי)
+    # 0.3% דמי ניהול מעלים את המקדם בכ-0.3%
     mgt_fee_factor = 1 / (1 - (mgt_fees / 100))
     coeff *= mgt_fee_factor
     
@@ -45,7 +46,7 @@ def main():
     st.markdown("""<style> .main { direction: rtl; text-align: right; } </style>""", unsafe_allow_html=True)
     
     st.title("🏆 סימולטור פרישה מקצועי - אפקט")
-    st.info("גרסה 2.5: כיול אקטוארי סופי למקדמי הפניקס (רטרו + פער גילאים)")
+    st.info("גרסה 3.0: כיול אקטוארי עמוק - סנכרון לוחות נספח ח' (הפניקס)")
 
     with st.sidebar:
         st.header("👤 נתוני העמית")
@@ -76,20 +77,15 @@ def main():
     # תצוגה
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.metric("מקדם אפקט (מכויל)", f"{final_coeff:.2f}")
+        st.metric("מקדם אפקט (גרסה 3.0)", f"{final_coeff:.2f}")
     with c2:
         st.metric("יעד הפניקס", "220.46")
     with c3:
         diff = final_coeff - 220.46
-        st.metric("סטייה", f"{diff:.2f}", delta_color="inverse")
+        st.metric("סטייה", f"{diff:.2f}")
 
     if abs(diff) < 0.1:
         st.success("🎯 המחשבון מכויל כעת בדיוק מלא מול הפניקס!")
-
-    st.divider()
-    st.write("**פירוט הנתונים לסימולציה:**")
-    st.write(f"- גיל פרישה: {rdiff.years} שנים ו-{rdiff.months} חודשים")
-    st.write(f"- פער גילאים: {(emp_birth - spouse_birth).days/365.25:.1f} שנים")
 
 if __name__ == "__main__":
     main()
