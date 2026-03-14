@@ -55,19 +55,19 @@ def main():
         retro_months = st.selectbox("חודשי רטרו", [0, 1, 2, 3], index=0)
         mgt_fees = st.number_input("דמי ניהול (%)", value=0.3, step=0.1)
 
-        # חישוב המקדם המעודכן
+        # חישוב המקדם
         rdiff = relativedelta(ret_date, emp_birth)
         exact_age = rdiff.years + (rdiff.months / 12)
         current_coeff = calculate_accurate_phoenix_coeff(
             gender, exact_age, guarantee, spouse_birth, emp_birth, survivor_pct, retro_months, mgt_fees
         )
         
-        # עדכון ה-Session State של המקדם (ללא התנגשות)
-        if "last_coeff" not in st.session_state or st.session_state.last_coeff != current_coeff:
-            st.session_state.last_coeff = current_coeff
-            if "funds" in st.session_state:
-                for i in range(len(st.session_state.funds)):
-                    st.session_state[f"c_{i}"] = current_coeff
+        # מנגנון רענון כוחני: אם המקדם השתנה, נשנה את ה-version_key של כל היישומונים
+        if "coeff_version" not in st.session_state:
+            st.session_state.coeff_version = 0
+        if "last_calc_coeff" not in st.session_state or st.session_state.last_calc_coeff != current_coeff:
+            st.session_state.last_calc_coeff = current_coeff
+            st.session_state.coeff_version += 1
 
         st.divider()
         st.subheader("📌 מקדם מטרה (אפקט)")
@@ -97,20 +97,16 @@ def main():
     total_pension = 0.0; total_capital = 0.0; total_assets = 0.0
 
     for i, fund in enumerate(st.session_state.funds):
-        # אתחול המקדם ב-Session State אם הוא לא קיים (מונע את ה-Error)
-        if f"c_{i}" not in st.session_state:
-            st.session_state[f"c_{i}"] = current_coeff
-
         with st.container():
             c1, c2, c3, c4 = st.columns([2, 1, 2, 1])
-            with c1: fund['name'] = st.text_input(f"תיאור", value=fund['name'], key=f"n_{i}")
-            with c2: fund['type'] = st.selectbox(f"סוג", ["קצבתי", "הוני"], index=0 if fund['type'] == 'קצבתי' else 1, key=f"t_{i}")
-            with c3: fund['amount'] = st.number_input(f"צבירה", value=fund['amount'], key=f"a_{i}")
+            with c1: fund['name'] = st.text_input(f"תיאור", value=fund['name'], key=f"n_{i}_{st.session_state.coeff_version}")
+            with c2: fund['type'] = st.selectbox(f"סוג", ["קצבתי", "הוני"], index=0 if fund['type'] == 'קצבתי' else 1, key=f"t_{i}_{st.session_state.coeff_version}")
+            with c3: fund['amount'] = st.number_input(f"צבירה", value=fund['amount'], key=f"a_{i}_{st.session_state.coeff_version}")
             
             if fund['type'] == 'קצבתי':
                 with c4:
-                    # שינוי: לא מגדירים value=, אלא סומכים רק על ה-Session State
-                    coeff_val = st.number_input(f"מקדם", format="%.2f", key=f"c_{i}")
+                    # ה-key משתנה בכל פעם שהמקדם בסיידבר משתנה, מה שמכריח את ה-value להתעדכן
+                    coeff_val = st.number_input(f"מקדם", value=current_coeff, format="%.2f", key=f"c_{i}_{st.session_state.coeff_version}")
                 total_pension += fund['amount'] / coeff_val if coeff_val > 0 else 0
                 total_assets += fund['amount']
             else:
