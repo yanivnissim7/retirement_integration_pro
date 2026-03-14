@@ -62,10 +62,9 @@ def main():
             gender, exact_age, guarantee, spouse_birth, emp_birth, survivor_pct, retro_months, mgt_fees
         )
         
-        # מנגנון רענון: אם המקדם השתנה בסיידבר, נעדכן את ה-Session State של כל התיבות בטבלה
+        # עדכון ה-Session State של המקדם (ללא התנגשות)
         if "last_coeff" not in st.session_state or st.session_state.last_coeff != current_coeff:
             st.session_state.last_coeff = current_coeff
-            # מעדכן את כל המקדמים בטבלה לערך החדש
             if "funds" in st.session_state:
                 for i in range(len(st.session_state.funds)):
                     st.session_state[f"c_{i}"] = current_coeff
@@ -98,6 +97,10 @@ def main():
     total_pension = 0.0; total_capital = 0.0; total_assets = 0.0
 
     for i, fund in enumerate(st.session_state.funds):
+        # אתחול המקדם ב-Session State אם הוא לא קיים (מונע את ה-Error)
+        if f"c_{i}" not in st.session_state:
+            st.session_state[f"c_{i}"] = current_coeff
+
         with st.container():
             c1, c2, c3, c4 = st.columns([2, 1, 2, 1])
             with c1: fund['name'] = st.text_input(f"תיאור", value=fund['name'], key=f"n_{i}")
@@ -106,8 +109,8 @@ def main():
             
             if fund['type'] == 'קצבתי':
                 with c4:
-                    # ה-key כאן (c_i) מקושר למנגנון הרענון בסיידבר
-                    coeff_val = st.number_input(f"מקדם", value=current_coeff, format="%.2f", key=f"c_{i}")
+                    # שינוי: לא מגדירים value=, אלא סומכים רק על ה-Session State
+                    coeff_val = st.number_input(f"מקדם", format="%.2f", key=f"c_{i}")
                 total_pension += fund['amount'] / coeff_val if coeff_val > 0 else 0
                 total_assets += fund['amount']
             else:
