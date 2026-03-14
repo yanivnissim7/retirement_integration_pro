@@ -1,114 +1,193 @@
 import streamlit as st
 import pandas as pd
-from datetime import date
+import plotly.graph_objects as go
+from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 
-def main():
-    st.set_page_config(page_title="אפקט - דוח פרישה מלא", layout="wide")
-    st.title("🏆 מערכת 'אפקט' - תכנון פרישה אסטרטגי")
+# --- נתוני יסוד 2026 ---
+SAL_PTUR_MAX = 976005 
+MAX_WAGE_FOR_EXEMPT = 13750 
 
-    # --- נתוני בסיס (גילאי 18-90) ---
-    today = date.today()
-    min_birth = today - relativedelta(years=90)
-    max_birth = today - relativedelta(years=18)
+def fmt_num(num): return f"{float(num):,.0f}"
+
+def calculate_income_tax(monthly_income, credit_points=2.25):
+    brackets = [(7010, 0.10), (10060, 0.14), (16150, 0.20), (22440, 0.31), (46690, 0.35), (float('inf'), 0.47)]
+    tax, prev_bracket = 0, 0
+    marginal_rate = 0.10
+    for bracket, rate in brackets:
+        if monthly_income > prev_bracket:
+            taxable_in_bracket = min(monthly_income, bracket) - prev_bracket
+            tax += taxable_in_bracket * rate
+            marginal_rate = rate
+            prev_bracket = bracket
+        else: break
+    return max(0, tax - (credit_points * 250)), marginal_rate
+
+def main():
+    st.set_page_config(page_title="דוח פרישה אסטרטגי - אפקט", layout="wide")
+
+    # CSS ליישור לימין (RTL) והתאמה להדפסה
+    st.markdown("""
+        <style>
+        .main, .stTabs, div[data-testid="stMetricValue"], .stMarkdown, p, h1, h2, h3, label {
+            direction: rtl;
+            text-align: right !important;
+        }
+        .stTable { direction: rtl; }
+        @media print {
+            .stTabs [data-baseweb="tab-list"] { display: none; }
+            .stTabs [data-baseweb="tab-panel"] { display: block !important; opacity: 1 !important; position: relative !important; }
+            .stButton, .stSlider, .stSelectbox, [data-testid="stSidebar"], header { display: none !important; }
+            .main { width: 100% !important; direction: rtl; }
+            .print-footer { display: block !important; margin-top: 50px; border-top: 1px solid black; padding-top: 20px; direction: rtl; }
+        }
+        .print-footer { display: none; }
+        </style>
+    """, unsafe_allow_html=True)
 
     with st.sidebar:
-        st.header("👤 פרטי לקוח")
-        emp_name = st.text_input("שם מלא", "ישראל ישראלי")
-        birth_date = st.date_input("תאריך לידה", value=date(1965, 11, 26), min_value=min_birth, max_value=max_birth)
-        ret_date = st.date_input("תאריך פרישה", value=date(2026, 11, 26))
-        rdiff = relativedelta(ret_date, birth_date)
-        st.info(f"גיל בפרישה: {rdiff.years}.{rdiff.months}")
+        st.header("👤 פרטי לקוח וסוכן")
+        agent_name = st.text_input("שם הסוכן המטפל", value="ישראל ישראלי")
+        client_name = st.text_input("שם הלקוח", value="")
+        client_id = st.text_input("מספר זהות", value="")
+        birth_date = st.date_input("תאריך לידה", value=date(1965, 11, 26))
+        
+        st.divider()
+        st.header("📋 נתוני פרישה")
+        retirement_date = st.date_input("תאריך פרישה", value=date(2025, 12, 31))
+        credit_points = st.number_input("נקודות זיכוי", value=2.25)
+        seniority = st.number_input("שנות ותק", value=33.4)
+        
+        st.divider()
+        st.header("💰 מענקים")
+        total_grant_bruto = st.number_input("סך מענק פרישה ברוטו", value=968000)
+        salary_for_exempt = st.number_input("שכר קובע לפטור", value=13750)
+        past_exempt_grants = st.number_input("סך מענקים פטורים בעבר", value=0)
 
-    # --- חלק 1: ריכוז קופות וצבירות ---
-    st.header("💰 1. ריכוז קופות וצבירות (הזנה ידנית)")
+    # כותרת הדוח
+    st.markdown(f"""
+        <div style="text-align: right; background-color: #f8f9fa; padding: 20px; border-radius: 10px; border-right: 5px solid #007bff;">
+            <h1 style="margin:0;">דוח תכנון פרישה אסטרטגי - אפקט סוכנות לביטוח בע"מ</h1>
+            <p style="font-size: 1.2em; margin: 10px 0 0 0;">
+                <b>עבור:</b> {client_name if client_name else "_______"} | <b>ת.ז:</b> {client_id if client_id else "_______"}
+            </p>
+            <p style="margin: 5px 0 0 0;"><b>סוכן מטפל:</b> {agent_name}</p>
+        </div>
+        <br>
+    """, unsafe_allow_html=True)
+
+    # --- חלק 1: ניהול קופות ומקדמים (הזנה ידנית) ---
+    st.subheader("1. ריכוז קופות וצבירות")
     if 'funds' not in st.session_state:
         st.session_state.funds = [{'name': 'מנורה מבטחים', 'type': 'קצבתי', 'amount': 1000000.0, 'coeff': 197.10}]
 
-    col_btns = st.columns([1, 1, 4])
+    col_btns = st.columns([1, 5])
     if col_btns[0].button("➕ הוסף קופה"):
         st.session_state.funds.append({'name': '', 'type': 'קצבתי', 'amount': 0.0, 'coeff': 200.0})
         st.rerun()
-    if col_btns[1].button("🗑️ נקה הכל"):
-        st.session_state.funds = []
-        st.rerun()
 
-    total_pension = 0.0
-    total_capital = 0.0
-    
-    # הצגת הקופות בטבלה ערוכה
+    total_pension_from_funds = 0.0
+    total_capital_from_funds = 0.0
+
     for i, fund in enumerate(st.session_state.funds):
         c1, c2, c3, c4 = st.columns([2, 1, 2, 1])
         fund['name'] = c1.text_input(f"שם קופה {i+1}", fund.get('name',''), key=f"n_{i}")
         fund['type'] = c2.selectbox("סוג", ["קצבתי", "הוני"], index=0 if fund.get('type')=='קצבתי' else 1, key=f"t_{i}")
         fund['amount'] = c3.number_input("צבירה (₪)", value=float(fund.get('amount',0)), key=f"a_{i}")
         if fund['type'] == 'קצבתי':
-            fund['coeff'] = c4.number_input("מקדם", value=float(fund.get('coeff',200)), key=f"c_{i}")
-            total_pension += fund['amount'] / fund['coeff'] if fund['coeff'] > 0 else 0
+            fund['coeff'] = c4.number_input("מקדם ידני", value=float(fund.get('coeff',200)), key=f"c_{i}")
+            total_pension_from_funds += fund['amount'] / fund['coeff'] if fund['coeff'] > 0 else 0
         else:
-            total_capital += fund['amount']
+            total_capital_from_funds += fund['amount']
+
+    expected_pension = total_pension_from_funds # הקצבה נגזרת מהקופות שהוזנו
 
     st.divider()
 
-    # --- חלק 2: קיבוע זכויות (סל הפטור) ---
-    st.header("📑 2. קיבוע זכויות - סל הפטור (161ד)")
-    col_k1, col_k2 = st.columns(2)
-    with col_k1:
-        grant_amount = st.number_input("מענקים פטורים שנתקבלו (15 שנה אחרונות)", value=0.0)
-        pension_limit_2025 = 882648  # תקרת הפטור
-    with col_k2:
-        multiplier = 1.35
-        consumed = grant_amount * multiplier
-        remaining = max(0, pension_limit_2025 - consumed)
-        st.metric("יתרת סל פטור להיוון/קצבה", f"₪{remaining:,.0f}")
-        st.caption(f"ניצול סל: ₪{consumed:,.0f} מתוך ₪{pension_limit_2025:,.0f}")
+    # --- חישובי ליבה (מבוסס על הקוד המקורי שלך) ---
+    actual_exempt_now = min(total_grant_bruto, seniority * min(salary_for_exempt, MAX_WAGE_FOR_EXEMPT))
+    taxable_grant_for_spread = total_grant_bruto - actual_exempt_now
+    seniority_ratio = 32 / seniority if seniority > 32 else 1
+    reduction = ((actual_exempt_now + past_exempt_grants) * 1.35) * seniority_ratio
+    rem_sal_base = max(0, SAL_PTUR_MAX - reduction)
+    max_mon_exemp = rem_sal_base / 180
 
-    st.divider()
+    st.subheader("2. אופטימיזציה של סל הפטור (קיבוע זכויות)")
+    pct_to_pension = st.select_slider("אחוז מהפטור לטובת הקצבה (השאר להון נזיל):", options=range(0, 101, 10), value=0)
+    selected_mon_exemp = max_mon_exemp * (pct_to_pension / 100)
+    rem_honi_ptur = rem_sal_base * (1 - (pct_to_pension / 100))
 
-    # --- חלק 3: טבלת פריסה וכדאיות ---
-    st.header("📉 3. פריסת מס וכדאיות כלכלית")
-    col_p1, col_p2 = st.columns([2, 1])
-    with col_p1:
-        st.write("**טבלת פריסת מס (הערכה):**")
-        spread_years = st.slider("שנות פריסה", 1, 6, 6)
-        tax_data = []
-        for y in range(1, spread_years + 1):
-            tax_data.append({"שנה": f"שנה {y}", "הכנסה צפויה": f"₪{total_pension*12/spread_years:,.0f}", "מס משוער": "לפי מדרגות"})
-        st.table(pd.DataFrame(tax_data))
+    tab1, tab2, tab3 = st.tabs(["📜 קיבוע וקצבה נטו", "🔄 דוח פריסה והשוואה", "📊 כדאיות כלכלית"])
+
+    with tab1:
+        tax_no_ex, _ = calculate_income_tax(expected_pension, credit_points)
+        tax_with_ex, _ = calculate_income_tax(max(0, expected_pension - selected_mon_exemp), credit_points)
+        st.subheader("ניתוח השפעה על הקצבה וההון")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("קצבה נטו (אחרי פטור)", f"₪{fmt_num(expected_pension - tax_with_ex)}", f"+₪{fmt_num(tax_no_ex - tax_with_ex)}")
+        c2.metric("מס הכנסה חודשי", f"₪{fmt_num(tax_with_ex)}")
+        c3.metric("סכום הוני פטור נותר", f"₪{fmt_num(rem_honi_ptur + total_capital_from_funds)}")
+
+    with tab2:
+        st.subheader("סימולציית פריסה מול תשלום מיידי")
+        is_after_oct = retirement_date.month >= 10
+        start_year = st.selectbox("שנת תחילת פריסה:", [retirement_date.year, retirement_date.year + 1], index=1 if is_after_oct else 0)
+        
+        max_years = 6
+        if start_year > retirement_date.year and not is_after_oct:
+            max_years = 5
+            st.warning("שים לב: דחיית פריסה למי שפרש לפני 1.10 מקצרת את התקופה ל-5 שנים.")
+            
+        num_years = st.slider("שנות פריסה:", 1, max_years, max_years)
+        ann_grant = taxable_grant_for_spread / num_years
+        spread_rows = []
+        total_tax_on_grant_only = 0
+        
+        for i in range(num_years):
+            yr = start_year + i
+            p_m = 12 if (yr != retirement_date.year) else (12 - retirement_date.month)
+            p_ann = expected_pension * p_m
+            tax_pension_only, _ = calculate_income_tax(max(0, (p_ann/12) - selected_mon_exemp), credit_points)
+            tax_total_monthly, m_rate = calculate_income_tax(max(0, (p_ann/12) + (ann_grant/12) - selected_mon_exemp), credit_points)
+            tax_on_grant_this_year = (tax_total_monthly - tax_pension_only) * 12
+            total_tax_on_grant_only += tax_on_grant_this_year
+            spread_rows.append({
+                "שנה": yr, "ברוטו שנתי": p_ann + ann_grant, "מס שנתי כולל": tax_total_monthly * 12,
+                "נטו שנתי": (p_ann + ann_grant) - (tax_total_monthly * 12), "מדרגת מס": f"{m_rate*100:.0f}%"
+            })
+        
+        st.table(pd.DataFrame(spread_rows).style.format({c: "₪{:,.0f}" for c in ["ברוטו שנתי", "מס שנתי כולל", "נטו שנתי"]}))
+        tax_no_spread_val = taxable_grant_for_spread * 0.47 
+        st.write("### 📉 סיכום חיסכון במס על המענק:")
+        col_a, col_b, col_c = st.columns(3)
+        col_a.error(f"מס ללא פריסה: ₪{fmt_num(tax_no_spread_val)}")
+        col_b.warning(f"מס בפריסה: ₪{fmt_num(total_tax_on_grant_only)}")
+        col_c.success(f"חיסכון נקי: ₪{fmt_num(tax_no_spread_val - total_tax_on_grant_only)}")
+
+    with tab3:
+        st.subheader("כדאיות כלכלית: הון מול קצבה")
+        tax_saving_15y = (tax_no_ex - calculate_income_tax(max(0, expected_pension - max_mon_exemp), credit_points)[0]) * 180
+        fig = go.Figure(data=[
+            go.Bar(name='הון נזיל פטור', x=['השוואה'], y=[rem_sal_base], marker_color='#2ecc71', text=f"₪{fmt_num(rem_sal_base)}", textposition='auto'),
+            go.Bar(name='חיסכון מס בקצבה (15 שנה)', x=['השוואה'], y=[tax_saving_15y], marker_color='#3498db', text=f"₪{fmt_num(tax_saving_15y)}", textposition='auto')
+        ])
+        st.plotly_chart(fig, use_container_width=True)
+
+    # חתימה להדפסה
+    st.markdown(f"""
+        <div class="print-footer">
+            <table style="width:100%; border:none; direction: rtl;">
+                <tr>
+                    <td style="text-align:right;"><b>סוכן מטפל:</b> {agent_name}</td>
+                    <td style="text-align:center;"><b>חתימת הלקוח ({client_name}):</b> _________________</td>
+                    <td style="text-align:left;"><b>תאריך:</b> {datetime.now().strftime('%d/%m/%Y')}</td>
+                </tr>
+            </table>
+        </div>
+    """, unsafe_allow_html=True)
     
-    with col_p2:
-        marginal_tax = st.number_input("מדרגת מס שולית (%)", value=20)
-        if total_capital > 0:
-            annuity_ratio = (total_pension * 12) / total_capital
-            st.metric("תשואת קצבה שנתית (ROI)", f"{annuity_ratio:.2%}")
-
-    st.divider()
-
-    # --- חלק 4: סיכום והדפסה ---
-    st.header("📋 4. סיכום דוח סופי")
-    s1, s2, s3 = st.columns(3)
-    s1.metric("קצבה חודשית ברוטו", f"₪{total_pension:,.2f}")
-    s2.metric("סה\"כ הון חד פעמי", f"₪{total_capital:,.0f}")
-    s3.metric("יתרת פטור בקיבוע", f"₪{remaining:,.0f}")
-
-    # כפתור הדפסה בשיטת HTML
-    report_html = f"""
-    <div style="direction:rtl; text-align:right; font-family:Arial; padding:20px; border:1px solid #ccc;">
-        <h2>דוח תכנון פרישה - אפקט</h2>
-        <p><b>שם הלקוח:</b> {emp_name}</p>
-        <p><b>גיל פרישה:</b> {rdiff.years}.{rdiff.months}</p>
-        <hr>
-        <h3>שורה תחתונה:</h3>
-        <ul>
-            <li>קצבה חודשית ברוטו: ₪{total_pension:,.2f}</li>
-            <li>הון חד פעמי: ₪{total_capital:,.0f}</li>
-            <li>יתרת סל פטור: ₪{remaining:,.0f}</li>
-        </ul>
-    </div>
-    """
-    
-    if st.button("🖨️ הכן דוח להדפסה"):
-        st.components.v1.html(report_html + "<script>window.print();</script>", height=400)
+    if st.button("🖨️ הדפס דוח סופי"):
+        st.components.v1.html("<script>window.print();</script>", height=0)
 
 if __name__ == "__main__":
     main()
