@@ -3,44 +3,33 @@ import pandas as pd
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 
-# --- מנוע אקטוארי "אפקט" גרסה 7.0 ---
+# --- מנוע אקטוארי "אפקט" ---
 def calculate_accurate_phoenix_coeff(gender, exact_age, guarantee, spouse_birth, emp_birth, survivor_pct, retro_months, mgt_fees):
-    # 1. טבלת עוגנים (גבר, הבטחה 0, שאירים 60%, ללא דמי ניהול)
-    # הערכים כוילו כדי להגיע ל-217.46 בגיל 67 עם 240 חודשים ודמי ניהול
     anchors = {
         60: 171.40, 61: 174.80, 62: 178.40, 63: 182.20, 64: 186.30,
         65: 190.58, 66: 196.10, 67: 201.20, 68: 206.50, 69: 212.00, 70: 217.80
     }
-    
     age_floor = int(exact_age)
     age_ceil = age_floor + 1
-    
     if age_floor in anchors and age_ceil in anchors:
         base = anchors[age_floor] + (anchors[age_ceil] - anchors[age_floor]) * (exact_age - age_floor)
     else:
         base = 201.20 + (exact_age - 67) * 5.2
 
-    # 2. קיזוז הבטחה מעל גיל 67
     eff_guarantee = guarantee
     if exact_age > 67 and guarantee > 0:
         eff_guarantee = max(0, guarantee - (exact_age - 67) * 12)
     
-    # 3. תוספת הבטחה
-    guarantee_impact = (eff_guarantee / 240) * 11.60
-    coeff = base + guarantee_impact
+    coeff = base + (eff_guarantee / 240) * 11.60
     
-    # 4. נספח ח' (פער גילאים)
     age_diff = (emp_birth - spouse_birth).days / 365.25
     if age_diff > 3:
-        dynamic_factor = 0.248 + (max(0, exact_age - 65) * 0.015)
-        coeff += (age_diff - 3) * dynamic_factor
+        coeff += (age_diff - 3) * (0.248 + (max(0, exact_age - 65) * 0.015))
     
-    # 5. שאירים, רטרו ודמי ניהול
     coeff += (survivor_pct - 60) * 0.185
     coeff *= (1 + (retro_months * 0.00355))
     coeff *= (1 / (1 - (mgt_fees / 100)))
-    
-    return round(coeff, 2), int(eff_guarantee)
+    return round(coeff, 2)
 
 def main():
     st.set_page_config(page_title="אפקט - סימולטור פרישה", layout="wide")
@@ -66,13 +55,21 @@ def main():
         retro_months = st.selectbox("חודשי רטרו", [0, 1, 2, 3], index=0)
         mgt_fees = st.number_input("דמי ניהול (%)", value=0.3, step=0.1)
 
-        # חישוב המקדם העדכני
+        # חישוב המקדם המעודכן
         rdiff = relativedelta(ret_date, emp_birth)
         exact_age = rdiff.years + (rdiff.months / 12)
-        current_coeff, eff_g = calculate_accurate_phoenix_coeff(
+        current_coeff = calculate_accurate_phoenix_coeff(
             gender, exact_age, guarantee, spouse_birth, emp_birth, survivor_pct, retro_months, mgt_fees
         )
         
+        # מנגנון רענון: אם המקדם השתנה בסיידבר, נעדכן את ה-Session State של כל התיבות בטבלה
+        if "last_coeff" not in st.session_state or st.session_state.last_coeff != current_coeff:
+            st.session_state.last_coeff = current_coeff
+            # מעדכן את כל המקדמים בטבלה לערך החדש
+            if "funds" in st.session_state:
+                for i in range(len(st.session_state.funds)):
+                    st.session_state[f"c_{i}"] = current_coeff
+
         st.divider()
         st.subheader("📌 מקדם מטרה (אפקט)")
         st.markdown(f"""
@@ -85,7 +82,6 @@ def main():
     # --- טבלת כספים ---
     st.subheader("💰 ריכוז קופות וצבירות")
     
-    # אתחול רשימת קופות ב-session_state אם לא קיימת
     if 'funds' not in st.session_state:
         st.session_state.funds = [{'name': 'קרן פנסיה', 'type': 'קצבתי', 'amount': 1000000.0}]
 
@@ -93,6 +89,7 @@ def main():
     with col_btn1:
         if st.button("➕ הוסף שורה"):
             st.session_state.funds.append({'name': '', 'type': 'קצבתי', 'amount': 0.0})
+            st.rerun()
     with col_btn2:
         if st.button("🗑️ נקה הכל"):
             st.session_state.funds = [{'name': 'קרן פנסיה', 'type': 'קצבתי', 'amount': 0.0}]
@@ -109,9 +106,9 @@ def main():
             
             if fund['type'] == 'קצבתי':
                 with c4:
-                    # שינוי קריטי: המקדם מוצג כ-value שמתעדכן מהסיידבר בכל הרצה
-                    coeff_input = st.number_input(f"מקדם", value=current_coeff, format="%.2f", key=f"c_{i}")
-                total_pension += fund['amount'] / coeff_input if coeff_input > 0 else 0
+                    # ה-key כאן (c_i) מקושר למנגנון הרענון בסיידבר
+                    coeff_val = st.number_input(f"מקדם", value=current_coeff, format="%.2f", key=f"c_{i}")
+                total_pension += fund['amount'] / coeff_val if coeff_val > 0 else 0
                 total_assets += fund['amount']
             else:
                 with c4: st.write(""); st.caption("סכום הוני")
