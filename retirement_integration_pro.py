@@ -2,36 +2,17 @@ import streamlit as st
 import pandas as pd
 from datetime import date
 from dateutil.relativedelta import relativedelta
-from fpdf import FPDF
-
-# --- פונקציה ליצירת PDF ---
-def create_pdf(emp_name, summary_data, funds):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    pdf.cell(200, 10, txt=f"Retirement Report: {emp_name}", ln=True, align='C')
-    pdf.ln(10)
-    
-    pdf.cell(200, 10, txt="Summary Results:", ln=True)
-    for key, value in summary_data.items():
-        pdf.cell(200, 10, txt=f"{key}: {value}", ln=True)
-    
-    pdf.ln(10)
-    pdf.cell(200, 10, txt="Funds Detail:", ln=True)
-    for fund in funds:
-        pdf.cell(200, 10, txt=f"{fund['name']} - {fund['type']}: Amount: {fund['amount']:,} | Coeff: {fund.get('coeff','N/A')}", ln=True)
-    
-    return pdf.output(dest='S').encode('latin-1')
 
 def main():
-    st.set_page_config(page_title="אפקט - תכנון פרישה מלא", layout="wide")
-    st.title("🏆 מערכת 'אפקט' - תכנון פרישה אסטרטגי")
+    st.set_page_config(page_title="אפקט - תכנון פרישה אסטרטגי", layout="wide")
+    st.title("🏆 מערכת 'אפקט' - תכנון פרישה מלא")
 
-    # --- SIDEBAR: גילאי 18-90 ---
+    # --- הגדרות טווח גילאים (18-90) ---
     today = date.today()
     min_birth = today - relativedelta(years=90)
     max_birth = today - relativedelta(years=18)
 
+    # --- SIDEBAR ---
     with st.sidebar:
         st.header("👤 פרטי לקוח")
         emp_name = st.text_input("שם מלא", "ישראל ישראלי")
@@ -39,69 +20,77 @@ def main():
         ret_date = st.date_input("תאריך פרישה", value=date(2026, 11, 26))
         
         rdiff = relativedelta(ret_date, birth_date)
-        age_val = rdiff.years + (rdiff.months/12)
         st.info(f"גיל בפרישה: {rdiff.years}.{rdiff.months}")
+        
+        st.divider()
+        st.header("👫 בן/ת זוג")
+        spouse_birth = st.date_input("תאריך לידה בן/ת זוג", value=date(1968, 11, 26), min_value=min_birth, max_value=max_birth)
 
     # --- טאבים לניהול התהליך ---
-    tab1, tab2, tab3, tab4 = st.tabs(["💰 ריכוז קופות", "📑 קיבוע זכויות", "📉 פריסת מס וכדאיות", "📋 סיכום וייצוא"])
+    tab1, tab2, tab3, tab4 = st.tabs(["💰 ריכוז קופות", "📑 קיבוע זכויות (161ד)", "📉 פריסת מס וכדאיות", "📋 סיכום דוח"])
 
     with tab1:
-        st.subheader("הזנת צבירות ומקדמים (מהפניקס/מנורה)")
+        st.subheader("ריכוז צבירות ומקדמים (הזנה ידנית)")
         if 'funds' not in st.session_state:
             st.session_state.funds = [{'name': 'מנורה מבטחים', 'type': 'קצבתי', 'amount': 1000000.0, 'coeff': 197.10}]
 
-        if st.button("➕ הוסף קופה"):
+        if st.button("➕ הוסף קופה/קרן"):
             st.session_state.funds.append({'name': '', 'type': 'קצבתי', 'amount': 0.0, 'coeff': 200.0})
             st.rerun()
 
         total_pension = 0.0
         total_capital = 0.0
+        
         for i, fund in enumerate(st.session_state.funds):
-            c1, c2, c3, c4 = st.columns([2, 1, 2, 1])
-            fund['name'] = c1.text_input("שם קופה", fund.get('name',''), key=f"n_{i}")
-            fund['type'] = c2.selectbox("סוג", ["קצבתי", "הוני"], index=0 if fund.get('type')=='קצבתי' else 1, key=f"t_{i}")
-            fund['amount'] = c3.number_input("צבירה (₪)", value=float(fund.get('amount',0)), key=f"a_{i}")
-            if fund['type'] == 'קצבתי':
-                fund['coeff'] = c4.number_input("מקדם ידני", value=float(fund.get('coeff',200)), key=f"c_{i}")
-                total_pension += fund['amount'] / fund['coeff'] if fund['coeff'] > 0 else 0
-            else:
-                total_capital += fund['amount']
+            with st.expander(f"קופה {i+1}: {fund.get('name','')}", expanded=True):
+                c1, c2, c3, c4 = st.columns([2, 1, 2, 1])
+                fund['name'] = c1.text_input("שם קופה", fund.get('name',''), key=f"n_{i}")
+                fund['type'] = c2.selectbox("סוג", ["קצבתי", "הוני"], index=0 if fund.get('type')=='קצבתי' else 1, key=f"t_{i}")
+                fund['amount'] = c3.number_input("צבירה (₪)", value=float(fund.get('amount',0)), key=f"a_{i}")
+                
+                if fund['type'] == 'קצבתי':
+                    fund['coeff'] = c4.number_input("מקדם", value=float(fund.get('coeff',200)), key=f"c_{i}")
+                    total_pension += fund['amount'] / fund['coeff'] if fund['coeff'] > 0 else 0
+                else:
+                    total_capital += fund['amount']
 
     with tab2:
-        st.subheader("קיבוע זכויות (טופס 161ד)")
-        col1, col2 = st.columns(2)
-        with col1:
-            grant_amount = st.number_input("מענקים פטורים שנתקבלו (ב-15 שנה אחרונות)", value=0.0)
-            pension_limit = 9430  # תקרת קצבה מזכה 2024-2025 (לדוגמה)
-            st.write(f"תקרת ההון הפטורה (2025): ₪882,648")
-        with col2:
-            is_commutation = st.checkbox("ביצוע היוון קצבה?")
-            commutation_amount = st.number_input("סכום להיוון", value=0.0) if is_commutation else 0
+        st.subheader("קיבוע זכויות - סל הפטור (טופס 161ד)")
+        c1, c2 = st.columns(2)
+        with c1:
+            grant_amount = st.number_input("מענקים פטורים שנתקבלו (15 שנה אחרונות)", value=0.0)
+            st.write("תקרת הפטור ל-2025: ₪882,648")
+        with c2:
+            multiplier = 1.35
+            consumed_limit = grant_amount * multiplier
+            remaining_limit = max(0, 882648 - consumed_limit)
+            st.metric("יתרת סל פטור להיוון/קצבה", f"₪{remaining_limit:,.0f}")
 
     with tab3:
-        st.subheader("פריסת מס וכדאיות")
-        spread_years = st.slider("שנות פריסה (קדימה/אחורה)", 1, 6, 6)
-        marginal_tax = st.slider("מדרגת מס משוערת בפרישה (%)", 10, 47, 20)
-        
-        st.info("בדיקת כדאיות: האם למשוך כספים כהון או כקצבה?")
-        roi_pension = (total_pension * 12) / (total_capital if total_capital > 0 else 1)
-        st.write(f"תשואת קצבה שנתית על ההון: {roi_pension:.2%}")
+        st.subheader("פריסת מס וכדאיות כלכלית")
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            spread_type = st.radio("סוג פריסה מבוקש", ["קדימה (על מענק פרישה)", "אחורה (על הפרשי שכר)"])
+            spread_years = st.slider("מספר שנות פריסה", 1, 6, 6)
+        with col_f2:
+            marginal_tax = st.number_input("מדרגת מס שולית צפויה (%)", value=20)
+            st.info("בדיקת כדאיות: יחס המרה קצבה מול הון")
+            if total_capital > 0:
+                annuity_ratio = (total_pension * 12) / total_capital
+                st.write(f"תשואת קצבה שנתית: {annuity_ratio:.2%}")
 
     with tab4:
-        st.subheader("סיכום דוח פרישה")
-        summary = {
-            "Total Pension (Gross)": f"ILS {total_pension:,.2f}",
-            "Total Capital": f"ILS {total_capital:,.0f}",
-            "Retirement Age": f"{age_val:.2f}"
-        }
-        st.write(summary)
-        
-        if st.button("Generate & Download PDF Report"):
-            try:
-                pdf_data = create_pdf(emp_name, summary, st.session_state.funds)
-                st.download_button(label="📥 Download PDF", data=pdf_data, file_name=f"Report_{emp_name}.pdf", mime="application/pdf")
-            except Exception as e:
-                st.error(f"Error generating PDF: {e}. Note: Make sure 'fpdf' is installed.")
+        st.subheader("סיכום נתוני פרישה")
+        res1, res2, res3 = st.columns(3)
+        res1.metric("קצבה חודשית ברוטו", f"₪{total_pension:,.2f}")
+        res2.metric("סה\"כ הון חד פעמי", f"₪{total_capital:,.0f}")
+        res3.metric("יתרת פטור בקיבוע", f"₪{remaining_limit:,.0f}")
+
+        st.divider()
+        if st.button("💾 שמור נתונים לייצוא"):
+            df_export = pd.DataFrame(st.session_state.funds)
+            csv = df_export.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
+            st.download_button("📥 הורד קובץ נתונים לאקסל", data=csv, file_name=f"Report_{emp_name}.csv")
 
 if __name__ == "__main__":
     main()
