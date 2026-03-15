@@ -50,9 +50,18 @@ def main():
         work_inc_ret_year = st.number_input("הכנסת עבודה בשנת הפרישה (ברוטו)", value=150000)
 
     # --- מנוע חישוב ריאקטיבי ---
+    # 1. חישוב המענק הפטור הריאלי (מוגבל בתקרה ובוותק)
     actual_exempt_161 = min(total_grant_bruto, seniority * min(salary_for_exempt, MAX_WAGE_FOR_EXEMPT))
+    
+    # 2. חישוב חלק המענק החייב במס
     taxable_grant = total_grant_bruto - actual_exempt_161
+    
+    # 3. חישוב מקדם התיקון (s_factor):
+    # אם הוותק מעל 32, המקדם הוא 32 חלקי הוותק. אם לא, המקדם הוא 1.
     s_factor = 32 / seniority if seniority > 32 else 1.0
+    
+    # 4. חישוב הנסיגה מהסל (הפגיעה):
+    # הפטור (נוכחי + עבר) מוכפל ב-1.35 ומתוקן לפי מקדם הוותק
     reduction_val = (actual_exempt_161 + past_exempt_grants) * 1.35 * s_factor
 
     # --- כותרת הדוח ---
@@ -205,3 +214,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
