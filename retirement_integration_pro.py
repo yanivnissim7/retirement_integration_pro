@@ -10,7 +10,6 @@ MAX_WAGE_FOR_EXEMPT = 13750
 def fmt_num(num): return f"₪{float(num):,.0f}"
 
 def calculate_income_tax(monthly_income, credit_points=2.25):
-    # מדרגות מס מעודכנות
     brackets = [(7010, 0.10), (10060, 0.14), (16150, 0.20), (22440, 0.31), (46690, 0.35), (float('inf'), 0.47)]
     tax, prev_bracket = 0, 0
     marginal_rate = 0.10
@@ -31,7 +30,7 @@ def main():
         st.session_state.funds = [{'name': 'מנורה', 'type': 'קצבתי', 'amount': 1000000.0, 'coeff': 197.10, 'include': True}]
     if 'v_pension' not in st.session_state: st.session_state.v_pension = 0.0
 
-    # --- SIDEBAR: קלט נתונים ---
+    # --- SIDEBAR ---
     with st.sidebar:
         st.header("📋 פרטי הדוח")
         agent_name = st.text_input("שם הסוכן / המתכנן", value="שם הסוכן שלך")
@@ -48,16 +47,18 @@ def main():
         past_exempt_grants = st.number_input("פטורים ב-15 שנה אחרונות", value=0)
         work_inc_ret_year = st.number_input("הכנסת עבודה בשנת הפרישה (ברוטו)", value=150000)
 
-    # --- מנוע חישוב (תיקון נוסחת הנסיגה) ---
-    # המענק הפטור מוגבל לפי ותק X תקרה (או המענק עצמו, הנמוך מביניהם)
+    # --- מנוע חישוב מתוקן (נוסחת הנסיגה המדויקת) ---
+    # הפטור למענק מוגבל לפי ותק X תקרה (או המענק עצמו, הנמוך מביניהם)
     actual_exempt_161 = min(total_grant_bruto, seniority * min(salary_for_exempt, MAX_WAGE_FOR_EXEMPT))
     taxable_grant = total_grant_bruto - actual_exempt_161
     
-    # חישוב הנסיגה: פטורים כפול 1.35, מוכפלים במקדם 32/ותק (אם ותק > 32)
-    s_factor = 32 / seniority if seniority > 32 else 1.0
-    reduction_val = (actual_exempt_161 + past_exempt_grants) * 1.35 * s_factor
+    # חישוב מקדם ותק לנסיגה (32 חלקי ותק אם הותק גדול מ-32)
+    seniority_factor = 32 / seniority if seniority > 32 else 1.0
+    
+    # חישוב הנסיגה: (פטורים נוכחיים + עבר) * 1.35 * מקדם ותק
+    reduction_val = (actual_exempt_161 + past_exempt_grants) * 1.35 * seniority_factor
 
-    # --- כותרת הדוח ---
+    # --- כותרת ---
     st.markdown(f"<h1 style='text-align: center; color: #1E3A8A;'>דוח סיכום פרישה ל: {client_name}</h1>", unsafe_allow_html=True)
     st.markdown(f"<p style='text-align: center;'><b>נערך על ידי:</b> {agent_name} | <b>תאריך:</b> {date.today().strftime('%d/%m/%Y')}</p>", unsafe_allow_html=True)
 
@@ -97,15 +98,19 @@ def main():
         st.subheader("קיבוע זכויות - השפעה על הנטו")
         pct_to_pension = st.select_slider("אחוז ניצול פטור לקצבה", options=range(0,101,10), value=100)
         
-        # חישוב סל הפטור 2026/2028 פחות הנסיגה
         sal_26 = max(0, (KITZBA_MAX * 0.575 * 180) - reduction_val)
         sal_28 = max(0, (KITZBA_MAX * 0.670 * 180) - reduction_val)
         
         mon_ex_26 = (sal_26 / 180) * (pct_to_pension / 100)
+        
         tax_no_ex, _ = calculate_income_tax(pension_total, credit_points)
         tax_with_ex_26, _ = calculate_income_tax(max(0, pension_total - mon_ex_26), credit_points)
 
-        st.write(f"🔍 **נסיגה מהסל:** {fmt_num(reduction_val)} (מבוסס על ותק {seniority} ומקדם {s_factor:.3f})")
+        # תצוגת נוסחת הנסיגה המעודכנת למשתמש
+        if seniority > 32:
+             st.write(f"🔍 **נסיגה מהסל:** {fmt_num(reduction_val)} (מענק פטור {fmt_num(actual_exempt_161)} × 1.35 × 32/{seniority:.1f})")
+        else:
+             st.write(f"🔍 **נסיגה מהסל:** {fmt_num(reduction_val)} (מענק פטור {fmt_num(actual_exempt_161)} × 1.35)")
         
         c26, c28 = st.columns(2)
         with c26:
@@ -140,7 +145,7 @@ def main():
         st.subheader("כדאיות כלכלית: הון מול קצבה")
         roi_26 = (tax_no_ex - tax_with_ex_26) * 180
         f1 = go.Figure(data=[
-            go.Bar(name='משיכת הון פטור (היוון)', x=['2026'], y=[sal_26], marker_color='#2ecc71'),
+            go.Bar(name='משיכת הון פטור', x=['2026'], y=[sal_26], marker_color='#2ecc71'),
             go.Bar(name='ערך פטור מקצבה (15 שנה)', x=['2026'], y=[roi_26], marker_color='#3498db')
         ])
         st.plotly_chart(f1)
