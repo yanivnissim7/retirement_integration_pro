@@ -47,111 +47,111 @@ def main():
         past_exempt_grants = st.number_input("פטורים ב-15 שנה אחרונות", value=0)
         work_inc_ret_year = st.number_input("הכנסת עבודה בשנת הפרישה (ברוטו)", value=150000)
 
-    # --- מנוע חישוב מתוקן (נוסחת הנסיגה המדויקת) ---
-    # הפטור למענק מוגבל לפי ותק X תקרה (או המענק עצמו, הנמוך מביניהם)
+    # --- מנוע חישוב נסיגה ---
     actual_exempt_161 = min(total_grant_bruto, seniority * min(salary_for_exempt, MAX_WAGE_FOR_EXEMPT))
     taxable_grant = total_grant_bruto - actual_exempt_161
-    
-    # חישוב מקדם ותק לנסיגה (32 חלקי ותק אם הותק גדול מ-32)
-    seniority_factor = 32 / seniority if seniority > 32 else 1.0
-    
-    # חישוב הנסיגה: (פטורים נוכחיים + עבר) * 1.35 * מקדם ותק
-    reduction_val = (actual_exempt_161 + past_exempt_grants) * 1.35 * seniority_factor
-
-    # --- כותרת ---
-    st.markdown(f"<h1 style='text-align: center; color: #1E3A8A;'>דוח סיכום פרישה ל: {client_name}</h1>", unsafe_allow_html=True)
-    st.markdown(f"<p style='text-align: center;'><b>נערך על ידי:</b> {agent_name} | <b>תאריך:</b> {date.today().strftime('%d/%m/%Y')}</p>", unsafe_allow_html=True)
+    s_factor = 32 / seniority if seniority > 32 else 1.0
+    reduction_val = (actual_exempt_161 + past_exempt_grants) * 1.35 * s_factor
 
     tab1, tab2, tab3, tab4 = st.tabs(["💰 קופות וצבירה", "📑 קיבוע זכויות ונטו", "🔄 דוח פריסה", "📊 כדאיות כלכלית"])
 
+    # --- TAB 1 & 2 (נשארו דומים לחישובים הקודמים) ---
     with tab1:
-        st.subheader("ריכוז קופות וצבירות")
-        st.session_state.v_pension = st.number_input("קצבה חודשית ותיקה/תקציבית", value=float(st.session_state.v_pension))
-        if st.button("➕ הוסף קופה"):
-            st.session_state.funds.append({'name': '', 'type': 'קצבתי', 'amount': 0.0, 'coeff': 200.0, 'include': True})
-            st.rerun()
-
         pension_total = st.session_state.v_pension
         pension_for_spread = st.session_state.v_pension
-        sum_honi_total = 0.0
-
         for i, fund in enumerate(st.session_state.funds):
-            c1, c2, c3, c4, c5 = st.columns([2, 1, 1.5, 1, 1])
-            fund['type'] = c2.selectbox(f"סוג {i+1}", ["קצבתי", "הוני"], key=f"t_{i}")
-            fund['amount'] = c3.number_input(f"צבירה {i+1}", value=float(fund['amount']), key=f"a_{i}")
-            if fund['type'] == "קצבתי":
-                fund['coeff'] = c4.number_input(f"מקדם {i+1}", value=float(fund['coeff']), key=f"c_{i}")
-                p_val = fund['amount'] / fund['coeff'] if fund['coeff'] > 0 else 0
-                pension_total += p_val
-                fund['include'] = c5.checkbox(f"בפריסה? {i+1}", value=fund['include'], key=f"inc_{i}")
-                if fund['include']: pension_for_spread += p_val
-            else:
-                sum_honi_total += fund['amount']
-        
-        st.divider()
-        res1, res2, res3 = st.columns(3)
-        res1.metric("סך הון הוני", fmt_num(sum_honi_total))
-        res2.metric("קצבה חודשית ברוטו", fmt_num(pension_total))
-        res3.metric("מענק פטור (161)", fmt_num(actual_exempt_161))
+            p_val = fund['amount'] / fund['coeff'] if fund.get('type') == 'קצבתי' and fund['coeff'] > 0 else 0
+            pension_total += p_val
+            if fund.get('include', True): pension_for_spread += p_val
+        st.metric("קצבה חודשית ברוטו חזויה", fmt_num(pension_total))
 
     with tab2:
-        st.subheader("קיבוע זכויות - השפעה על הנטו")
-        pct_to_pension = st.select_slider("אחוז ניצול פטור לקצבה", options=range(0,101,10), value=100)
-        
         sal_26 = max(0, (KITZBA_MAX * 0.575 * 180) - reduction_val)
         sal_28 = max(0, (KITZBA_MAX * 0.670 * 180) - reduction_val)
-        
+        pct_to_pension = st.select_slider("אחוז ניצול פטור לקצבה", options=range(0,101,10), value=100)
         mon_ex_26 = (sal_26 / 180) * (pct_to_pension / 100)
+        mon_ex_28 = (sal_28 / 180) * (pct_to_pension / 100)
         
         tax_no_ex, _ = calculate_income_tax(pension_total, credit_points)
         tax_with_ex_26, _ = calculate_income_tax(max(0, pension_total - mon_ex_26), credit_points)
+        tax_with_ex_28, _ = calculate_income_tax(max(0, pension_total - mon_ex_28), credit_points)
 
-        # תצוגת נוסחת הנסיגה המעודכנת למשתמש
-        if seniority > 32:
-             st.write(f"🔍 **נסיגה מהסל:** {fmt_num(reduction_val)} (מענק פטור {fmt_num(actual_exempt_161)} × 1.35 × 32/{seniority:.1f})")
-        else:
-             st.write(f"🔍 **נסיגה מהסל:** {fmt_num(reduction_val)} (מענק פטור {fmt_num(actual_exempt_161)} × 1.35)")
-        
-        c26, c28 = st.columns(2)
-        with c26:
-            st.info("### מצב ב-2026")
-            st.metric("יתרת סל פטור", fmt_num(sal_26))
-            st.metric("תוספת חודשית לנטו", fmt_num(tax_no_ex - tax_with_ex_26))
-            st.metric("קצבת נטו סופית", fmt_num(pension_total - tax_with_ex_26))
-        with c28:
-            st.success("### פוטנציאל ב-2028")
-            st.metric("יתרת סל פטור", fmt_num(sal_28))
-            mon_ex_28 = (sal_28 / 180) * (pct_to_pension / 100)
-            tax_with_ex_28, _ = calculate_income_tax(max(0, pension_total - mon_ex_28), credit_points)
-            st.metric("תוספת חודשית לנטו", fmt_num(tax_no_ex - tax_with_ex_28))
-            st.metric("קצבת נטו סופית", fmt_num(pension_total - tax_with_ex_28))
-
+    # --- TAB 3: דוח פריסה משופר ---
     with tab3:
-        st.subheader("דוח עזר למס הכנסה - פריסת מענקים")
-        ann_grant = taxable_grant / 6
+        st.subheader("ניתוח פריסת מענקים (סעיף 8ג)")
+        
+        # לוגיקה של 1.10
+        is_late_retirement = ret_date.month >= 10
+        default_start_year = ret_date.year + 1 if is_late_retirement else ret_date.year
+        
+        c1, c2 = st.columns(2)
+        start_spread_year = c1.number_input("שנת תחילת פריסה", value=default_start_year)
+        spread_years = c2.selectbox("מספר שנות פריסה", [1, 2, 3, 4, 5, 6], index=5)
+        
+        ann_grant = taxable_grant / spread_years
         data_spread = []
-        for i in range(6):
-            yr = ret_date.year + i
+        for i in range(spread_years):
+            yr = start_spread_year + i
+            # הכנסה מעבודה - רק בשנת הפרישה המקורית
             inc_work = work_inc_ret_year if yr == ret_date.year else 0
-            inc_pension = (pension_for_spread * 12) if yr >= ret_date.year else 0
-            tax_full, _ = calculate_income_tax((inc_work + inc_pension + ann_grant)/12, credit_points)
+            # קצבה שנתית
+            inc_pension = (pension_for_spread * 12)
+            # סה"כ הכנסה שנתית כולל החלק הפרוס מהמענק
+            total_annual_taxable = inc_work + inc_pension + ann_grant
+            
+            tax_full, _ = calculate_income_tax(total_annual_taxable/12, credit_points)
             tax_base, _ = calculate_income_tax((inc_work + inc_pension)/12, credit_points)
             tax_on_grant = (tax_full - tax_base) * 12
-            data_spread.append([yr, fmt_num(inc_work), fmt_num(inc_pension), fmt_num(ann_grant), fmt_num(max(0, tax_on_grant))])
+            
+            data_spread.append([
+                yr, 
+                fmt_num(inc_work), 
+                fmt_num(inc_pension), 
+                fmt_num(ann_grant), 
+                fmt_num(total_annual_taxable),
+                fmt_num(max(0, tax_on_grant))
+            ])
         
-        st.table(pd.DataFrame(data_spread, columns=["שנה", "הכנסה מעבודה", "הכנסה מקצבה", "חלק יחסי מענק", "מס שנתי משוער"]))
+        df_spread = pd.DataFrame(data_spread, columns=["שנה", "הכנסה מעבודה", "קצבה שנתית", "מענק פרוס", "סה\"כ הכנסה למס", "מס שנתי משוער"])
+        st.table(df_spread)
 
+    # --- TAB 4: כדאיות כלכלית מורחבת ---
     with tab4:
-        st.subheader("כדאיות כלכלית: הון מול קצבה")
-        roi_26 = (tax_no_ex - tax_with_ex_26) * 180
-        f1 = go.Figure(data=[
-            go.Bar(name='משיכת הון פטור', x=['2026'], y=[sal_26], marker_color='#2ecc71'),
-            go.Bar(name='ערך פטור מקצבה (15 שנה)', x=['2026'], y=[roi_26], marker_color='#3498db')
-        ])
-        st.plotly_chart(f1)
+        st.subheader("ניתוח כדאיות: 2026 מול 2028 ואימפקט מצטבר")
+        
+        net_26 = pension_total - tax_with_ex_26
+        net_28 = pension_total - tax_with_ex_28
+        diff_monthly = net_28 - net_26
+        impact_15_years = (tax_no_ex - tax_with_ex_28) * 180 # תוספת הנטו המקסימלית לאורך 180 חודשים
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("קצבת נטו - 2026", fmt_num(net_26), help=f"ברוטו: {fmt_num(pension_total)}")
+        with col2:
+            st.metric("קצבת נטו - 2028", fmt_num(net_28), f"{fmt_num(diff_monthly)} תוספת")
+        with col3:
+            st.metric("חיסכון מס מצטבר (15 שנה)", fmt_num(impact_15_years))
+            
+        st.divider()
+        
+        # טבלת השוואה ברוטו/נטו
+        comparison_data = {
+            "פרמטר": ["קצבת ברוטו", "פטור חודשי ממס", "מס הכנסה חודשי", "קצבת נטו"],
+            "מצב 2026": [fmt_num(pension_total), fmt_num(mon_ex_26), fmt_num(tax_with_ex_26), fmt_num(net_26)],
+            "מצב 2028": [fmt_num(pension_total), fmt_num(mon_ex_28), fmt_num(tax_with_ex_28), fmt_num(net_28)]
+        }
+        st.table(pd.DataFrame(comparison_data))
+        
+        # גרף אימפקט
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=[i for i in range(1, 16)], 
+                                 y=[(tax_no_ex - tax_with_ex_28) * 12 * i for i in range(1, 16)],
+                                 mode='lines+markers', name='חיסכון מס מצטבר'))
+        fig.update_layout(title="צבירת חיסכון המס לאורך 15 שנות פרישה", xaxis_title="שנים מרגע קיבוע", yaxis_title="₪ מצטבר")
+        st.plotly_chart(fig)
 
     st.markdown("---")
-    st.markdown("<div style='direction: rtl; text-align: right; font-size: 12px; color: gray;'>דיסקליימר: סימולציה בלבד. חבות המס הסופית תיקבע על ידי פקיד השומה.</div>", unsafe_allow_html=True)
+    st.markdown("<div style='text-align: center; color: gray;'>מערכת אפקט | כלי עזר לתכנון פרישה אופטימלי</div>", unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
