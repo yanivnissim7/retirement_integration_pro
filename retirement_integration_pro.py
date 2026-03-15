@@ -52,8 +52,8 @@ def main():
     # --- מנוע חישוב ריאקטיבי ---
     actual_exempt_161 = min(total_grant_bruto, seniority * min(salary_for_exempt, MAX_WAGE_FOR_EXEMPT))
     taxable_grant = total_grant_bruto - actual_exempt_161
-    s_factor = 32 / seniority if seniority > 32 else 1.0
-    reduction_val = (actual_exempt_161 + past_exempt_grants) * 1.35 * s_factor
+  s_factor = 32 / seniority if seniority > 32 else 1.0
+reduction_val = (actual_exempt_161 + past_exempt_grants) * 1.35 * s_factor
 
     # --- כותרת הדוח ---
     st.markdown(f"<h1 style='text-align: center; color: #1E3A8A;'>דוח סיכום פרישה ל: {client_name}</h1>", unsafe_allow_html=True)
@@ -205,3 +205,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
